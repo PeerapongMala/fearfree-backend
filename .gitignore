@@ -1,0 +1,19 @@
+# ไฟล์ Environment (ความลับ ห้ามเอาขึ้นเด็ดขาด!)
+.env
+
+# ไฟล์ขยะที่เกิดจากการ Compile ของ Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+test
+
+# โฟลเดอร์ชั่วคราว
+tmp/
+vendor/
+
+# ไฟล์ระบบ OS
+.DS_Store
+Thumbs.db
