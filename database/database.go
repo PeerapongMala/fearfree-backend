@@ -28,8 +28,8 @@ func ConnectDB() {
 	})
 
 	if err != nil {
-		log.Fatal("❌ Failed to connect to database: \n", err)
+		log.Fatal("Failed to connect to database: \n", err)
 	}
 
-	log.Println("✅ Database Connected Successfully!")
+	log.Println("Database Connected Successfully!")
 }
