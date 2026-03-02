@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"os"
+	"fearfree-backend/config"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -24,7 +24,7 @@ func Protect(c *fiber.Ctx) error {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fiber.ErrUnauthorized
 		}
-		return []byte(os.Getenv("JWT_SECRET")), nil
+		return []byte(config.Env.JWTSecret), nil
 	})
 
 	if err != nil || !token.Valid {
@@ -42,5 +42,13 @@ func Protect(c *fiber.Ctx) error {
 	}
 
 	// 4. ผ่านด่านได้! ไปทำฟังก์ชันถัดไป
+	return c.Next()
+}
+
+func IsAdmin(c *fiber.Ctx) error {
+	role := c.Locals("role")
+	if role != "admin" {
+		return c.Status(403).JSON(fiber.Map{"error": "ไม่มีสิทธิ์เข้าถึง (Admin Only)"})
+	}
 	return c.Next()
 }

@@ -3,6 +3,7 @@ package controllers
 import (
 	"fearfree-backend/database"
 	"fearfree-backend/models"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -32,88 +33,106 @@ func ListStagesByAnimal(c *fiber.Ctx) error {
 	animalId := c.Params("animalId")
 	var stages []models.Stage
 
-	// Preload Media เพื่อเอารูป/วิดีโอของด่านนั้นมาด้วย
-	if err := database.DB.Preload("Media").Where("animal_id = ?", animalId).Order("stage_no asc").Find(&stages).Error; err != nil {
+	if err := database.DB.Where("animal_id = ?", animalId).Order("stage_no asc").Find(&stages).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลด่านไม่สำเร็จ"})
 	}
 	return c.JSON(fiber.Map{"data": stages})
-
 }
-
-// ... (ต่อจาก func เดิม)
 
 // Struct สำหรับรับค่าจากหน้าบ้าน (Body)
 type SubmitStageInput struct {
-	Answer string `json:"answer"` // ส่งมาว่า "pass" หรือ "fail"
+	Answer      string `json:"answer"`       // ส่งมาว่า "pass" หรือ "fail"
+	SymptomNote string `json:"symptom_note"` // บันทึกอาการกลัว
 }
 
-// ✅ 4. ส่งผลการเล่น (จบด่าน)
+// ✅ 4. ส่งผลการเล่น (จบด่าน) อัปเดตตาราง PatientProgress
 func SubmitStageResult(c *fiber.Ctx) error {
-	// 1. เตรียมตัวแปร
 	userID := c.Locals("user_id").(uint)
-	stageID, _ := c.ParamsInt("stageId")
+	levelID, _ := c.ParamsInt("levelId")
 	var input SubmitStageInput
 
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	// 2. ถ้าเล่นไม่ผ่าน ก็ไม่ต้องทำอะไร
+	var patient models.Patient
+	if err := database.DB.Where("user_id = ?", userID).First(&patient).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ป่วย"})
+	}
+
+	var stage models.Stage
+	if err := database.DB.First(&stage, levelID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบด่านนี้"})
+	}
+
 	if input.Answer != "pass" {
 		return c.JSON(fiber.Map{"message": "บันทึกผล: ยังไม่ผ่านด่าน"})
 	}
 
-	// 3. เริ่ม Transaction (เพราะมีการแก้เงิน + บันทึกผล ต้องทำพร้อมกัน)
-	tx := database.DB.Begin()
-
-	// 3.1 ดึงกติกาเกม (เพื่อดูว่าด่านละกี่เหรียญ)
-	var rules models.GameRules
-	if err := tx.First(&rules, 1).Error; err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "ไม่พบการตั้งค่าเกม"})
+	// ✅ ค้นหาด่านถัดไปของสัตว์ตัวเดิม
+	var nextStage models.Stage
+	hasNext := false
+	if err := database.DB.Where("animal_id = ? AND stage_no = ?", stage.AnimalID, stage.StageNo+1).First(&nextStage).Error; err == nil {
+		hasNext = true
 	}
 
-	// 3.2 เช็คว่าเคยเล่นผ่านด่านนี้ไปหรือยัง? (ถ้าเคยแล้ว ไม่แจกเหรียญซ้ำ)
-	var existingResult models.StageResult
-	result := tx.Where("user_id = ? AND stage_id = ?", userID, stageID).First(&existingResult)
+	tx := database.DB.Begin()
+
+	var progress models.PatientProgress
+	result := tx.Where("patient_id = ? AND stage_id = ?", patient.ID, levelID).First(&progress)
+
+	now := time.Now()
 
 	if result.RowsAffected == 0 {
-		// --- กรณี: เพิ่งผ่านครั้งแรก (First Clear) ---
-
-		// A. สร้างประวัติการเล่นใหม่
-		newResult := models.StageResult{
-			UserID:  userID,
-			StageID: uint(stageID),
-			Answer:  input.Answer,
+		// First Clear
+		newProgress := models.PatientProgress{
+			PatientID:   patient.ID,
+			StageID:     uint(levelID),
+			Status:      models.StatusCompleted,
+			SymptomNote: input.SymptomNote,
+			CompletedAt: &now,
+			UnlockDate:  &now,
 		}
-		if err := tx.Create(&newResult).Error; err != nil {
+		if err := tx.Create(&newProgress).Error; err != nil {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": "บันทึกผลไม่สำเร็จ"})
 		}
 
-		// B. เพิ่มเหรียญให้ User
-		if err := tx.Model(&models.User{}).Where("id = ?", userID).
-			Update("balance", gorm.Expr("balance + ?", rules.CoinPerStage)).Error; err != nil {
+		// Add Coins to Patient
+		if err := tx.Model(&patient).Update("balance", gorm.Expr("balance + ?", stage.RewardCoins)).Error; err != nil {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": "อัปเดตเหรียญไม่สำเร็จ"})
 		}
 
 		tx.Commit()
 		return c.JSON(fiber.Map{
+			"success":      true,
 			"message":      "ผ่านด่านสำเร็จ! (ได้รับเหรียญรางวัล)",
-			"coins_earned": rules.CoinPerStage,
+			"earned_coins": stage.RewardCoins,
+			"next_stage": fiber.Map{
+				"has_next": hasNext,
+				"stage_id": nextStage.ID,
+				"stage_no": nextStage.StageNo,
+			},
 		})
 
 	} else {
-		// --- กรณี: เคยผ่านไปแล้ว (Replay) ---
-		// แค่อัปเดตเวลาเล่นล่าสุด ไม่แจกเหรียญเพิ่ม
-		existingResult.Answer = input.Answer
-		tx.Save(&existingResult)
+		// Replay
+		progress.Status = models.StatusCompleted
+		progress.SymptomNote = input.SymptomNote
+		progress.CompletedAt = &now
+		tx.Save(&progress)
 
 		tx.Commit()
 		return c.JSON(fiber.Map{
+			"success":      true,
 			"message":      "ผ่านด่านสำเร็จ! (เคยได้รับรางวัลไปแล้ว)",
-			"coins_earned": 0,
+			"earned_coins": 0,
+			"next_stage": fiber.Map{
+				"has_next": hasNext,
+				"stage_id": nextStage.ID,
+				"stage_no": nextStage.StageNo,
+			},
 		})
 	}
 }

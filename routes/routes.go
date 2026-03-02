@@ -8,38 +8,65 @@ import (
 )
 
 func Setup(app *fiber.App) {
-	// ... (Auth Routes เดิม) ...
-	auth := app.Group("/auth")
+	api := app.Group("/api/v1")
 
+	auth := api.Group("/auth")
 	auth.Post("/signup", controllers.Signup)
 	auth.Post("/login", controllers.Login)
 
-	v1 := app.Group("/auth/v1", middleware.Protect)
+	// Users endpoints (Moved from Auth)
+	users := api.Group("/users", middleware.Protect)
+	users.Get("/me", controllers.GetProfile)
+	users.Patch("/me", controllers.UpdateProfile)
+	users.Get("/me/redemptions", controllers.GetMyRedemptions) // Moved from rewards
+	users.Get("/play-history", controllers.GetMyPlayHistory)
 
-	v1.Get("/me", controllers.GetProfile)
-	v1.Patch("/me", controllers.UpdateProfile)
+	stages := api.Group("/stages", middleware.Protect)
+	stages.Get("/categories", controllers.ListAnimalCategories)                      // ดึงหมวดหมู่
+	stages.Get("/categories/:categoryId/animals", controllers.ListAnimalsByCategory) // ดึงสัตว์
+	stages.Get("/animals/:animalId/levels", controllers.ListStagesByAnimal)          // ดึงด่าน (ใช้คำว่า levels แทน stages)
+	stages.Post("/levels/:levelId/results", controllers.SubmitStageResult)           // บันทึกผลการเล่น
 
-	stages := app.Group("/stages/v1", middleware.Protect)
-
-	stages.Get("/categories", controllers.ListAnimalCategories)           // ดึงหมวดหมู่
-	stages.Get("/:categoryId/animals", controllers.ListAnimalsByCategory) // ดึงสัตว์
-	stages.Get("/:animalId/stage", controllers.ListStagesByAnimal)        // ดึงด่าน
-	stages.Post("/:stageId/result", controllers.SubmitStageResult)
-
-	rewards := app.Group("/rewards/v1", middleware.Protect)
-
+	rewards := api.Group("/rewards", middleware.Protect)
 	rewards.Get("/", controllers.ListRewards)                   // ดูของรางวัล
 	rewards.Post("/:rewardId/redeem", controllers.RedeemReward) // แลกรางวัล
-	rewards.Get("/me", controllers.GetMyRedemptions)            // ดูประวัติ
 
-	assessment := app.Group("/assessment/v1", middleware.Protect)
+	assessments := api.Group("/assessments", middleware.Protect)
+	assessments.Get("/questions", controllers.GetAssessments)
+	assessments.Post("/results", controllers.SubmitAssessment)
 
-	assessment.Get("/", controllers.GetAssessments)
-	assessment.Post("/submit", controllers.SubmitAssessment)
-
-	hospitals := app.Group("/hospitals/v1", middleware.Protect)
-
+	hospitals := api.Group("/hospitals", middleware.Protect)
 	hospitals.Get("/", controllers.ListHospitals)         // ดูรายชื่อทั้งหมด
 	hospitals.Post("/select", controllers.SelectHospital) // เลือกสังกัด
 	hospitals.Get("/me", controllers.GetMyHospital)       // ดูสังกัดของฉัน
+
+	doctor := api.Group("/doctor", middleware.Protect)
+	doctor.Get("/patients", controllers.GetPatients)
+	doctor.Post("/patients", controllers.CreatePatientDoctor)
+	doctor.Delete("/patients/:id", controllers.DeletePatient)
+	doctor.Get("/patients/:id/history", controllers.GetPatientPlayHistoryAggregated)
+	doctor.Get("/patients/:id/test-history", controllers.GetPatientTestHistoryNotes)
+	doctor.Get("/patients/:id/redemptions", controllers.GetPatientRedemptionsDoc)
+
+	admin := api.Group("/admin", middleware.Protect, middleware.IsAdmin)
+	// Rewards
+	admin.Get("/rewards", controllers.AdminGetRewards)
+	admin.Post("/rewards", controllers.AdminCreateReward)
+	admin.Put("/rewards/:id", controllers.AdminUpdateReward)
+	admin.Delete("/rewards/:id", controllers.AdminDeleteReward)
+
+	// Categories
+	admin.Post("/categories", controllers.AdminCreateCategory)
+	admin.Put("/categories/:id", controllers.AdminUpdateCategory)
+	admin.Delete("/categories/:id", controllers.AdminDeleteCategory)
+
+	// Animals
+	admin.Post("/animals", controllers.AdminCreateAnimal)
+	admin.Put("/animals/:id", controllers.AdminUpdateAnimal)
+	admin.Delete("/animals/:id", controllers.AdminDeleteAnimal)
+
+	// Stages
+	admin.Post("/stages", controllers.AdminCreateStage)
+	admin.Put("/stages/:id", controllers.AdminUpdateStage)
+	admin.Delete("/stages/:id", controllers.AdminDeleteStage)
 }

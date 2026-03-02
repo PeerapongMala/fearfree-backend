@@ -1,48 +1,49 @@
 package main
 
 import (
+	"log"
+
+	"fearfree-backend/config"
 	"fearfree-backend/database"
+	"fearfree-backend/middleware"
 	"fearfree-backend/models"
 	"fearfree-backend/routes" // ✅ เพิ่มบรรทัดนี้
-	"log"
-	"os"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("Note: .env file not found")
-	}
+	config.LoadConfig()
 
 	database.ConnectDB()
 
+	// สร้าง ENUM types ใน PostgreSQL ก่อน
+	database.DB.Exec("DO $$ BEGIN CREATE TYPE user_role AS ENUM ('patient', 'doctor', 'admin'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+	database.DB.Exec("DO $$ BEGIN CREATE TYPE fear_level AS ENUM ('low', 'medium', 'high'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+	database.DB.Exec("DO $$ BEGIN CREATE TYPE media_type_enum AS ENUM ('image', 'video'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+	database.DB.Exec("DO $$ BEGIN CREATE TYPE progress_status AS ENUM ('locked', 'in_progress', 'completed'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+
 	database.DB.AutoMigrate(
 		&models.User{},
-		&models.Auth{},
-		&models.Role{},
+		&models.Patient{},
+		&models.Assessment{},
 		&models.AnimalCategory{},
 		&models.Animal{},
-		&models.MediaStore{},
 		&models.Stage{},
-		&models.StageResult{},
-		&models.GameRules{},
+		&models.PatientProgress{},
 		&models.Reward{},
-		&models.RewardsUser{},
-		&models.AssessmentStore{},
-		&models.AssessmentResult{},
-		&models.Hospital{},
-		&models.UserHospital{},
+		&models.RedemptionHistory{},
 	)
 
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		ErrorHandler: middleware.ErrorHandler,
+	})
 
 	// ✅ ตั้งค่า CORS (เพื่อให้ Frontend Next.js เรียกมาได้)
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "http://localhost:3000",
-		AllowHeaders: "Origin, Content-Type, Accept",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 	}))
 
 	// ✅ เรียกใช้ Routes
@@ -52,10 +53,7 @@ func main() {
 		return c.JSON(fiber.Map{"message": "FearFree Backend is Running! 🚀"})
 	})
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	port := config.Env.Port
 	log.Fatal(app.Listen(":" + port))
 
 }
