@@ -2,35 +2,38 @@ package models
 
 import "time"
 
+type UserRole string
+
+const (
+	RolePatient UserRole = "patient"
+	RoleDoctor  UserRole = "doctor"
+	RoleAdmin   UserRole = "admin"
+)
+
 type User struct {
+	ID           uint      `json:"id" gorm:"primaryKey"`
+	Username     string    `json:"username" gorm:"unique;not null"`
+	Email        string    `json:"email" gorm:"unique;not null"`
+	PasswordHash string    `json:"-" gorm:"not null"`
+	Role         UserRole  `json:"role" gorm:"type:user_role;default:'patient'"`
+	CreatedAt    time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt    time.Time `json:"updated_at" gorm:"default:CURRENT_TIMESTAMP"`
+
+	Patient *Patient `json:"patient,omitempty" gorm:"foreignKey:UserID"`
+}
+
+type Patient struct {
 	ID             uint      `json:"id" gorm:"primaryKey"`
-	Age            int       `json:"age"`
+	UserID         uint      `json:"user_id" gorm:"uniqueIndex"`
 	FullName       string    `json:"full_name"`
-	Email          string    `json:"email" gorm:"unique"`
+	Age            int       `json:"age"`
 	MostFearAnimal string    `json:"most_fear_animal"`
+	FearLevel      string    `json:"fear_level" gorm:"type:fear_level"`
 	Balance        int64     `json:"balance" gorm:"default:0"`
 	CodePatient    *string   `json:"code_patient" gorm:"unique"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-
-	// Relations
-	Auth  *Auth  `json:"-" gorm:"foreignKey:UserID"`
-	Roles []Role `json:"roles" gorm:"many2many:users_role;"`
+	CreatedAt      time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"default:CURRENT_TIMESTAMP"`
 }
 
-type Auth struct {
-	ID           uint   `json:"id" gorm:"primaryKey"`
-	Username     string `json:"username" gorm:"unique"`
-	PasswordHash string `json:"-"`
-	UserID       uint   `json:"user_id"`
-}
-
-type Role struct {
-	ID       uint   `json:"id" gorm:"primaryKey"`
-	RoleName string `json:"role_name"`
-}
-
-// ตั้งชื่อตารางให้ตรงกับ DB
-func (User) TableName() string { return "users" }
-func (Auth) TableName() string { return "auth" }
-func (Role) TableName() string { return "role" }
+func (User) TableName() string    { return "users" }
+func (Patient) TableName() string { return "patients" }

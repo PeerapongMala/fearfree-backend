@@ -9,10 +9,13 @@ import (
 
 // GET /assessment/v1 (ดึงคำถาม)
 func GetAssessments(c *fiber.Ctx) error {
-	var questions []models.AssessmentStore
-	// ดึงเฉพาะที่ Active และเรียงตามลำดับ (Seq)
-	if err := database.DB.Where("is_active = ?", true).Order("seq asc").Find(&questions).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ดึงแบบประเมินไม่สำเร็จ"})
+	// จำลองชุดคำถาม 5 ข้อ เนื่องจากไม่ได้เก็บไว้ในฐานข้อมูลตาม Schema ล่าสุด
+	questions := []fiber.Map{
+		{"id": 1, "prompt": "คุณรู้สึกกลัวเมื่อเห็นรูปภาพของสัตว์ที่คุณกลัวหรือไม่?"},
+		{"id": 2, "prompt": "คุณรู้สึกใจสั่นเมื่ออยู่ในที่ที่คิดว่าสัตว์ที่คุณกลัวอาจจะอยู่หรือไม่?"},
+		{"id": 3, "prompt": "คุณหลีกเลี่ยงการไปสถานที่บางแห่งเนื่องจากกลัวว่าจะเจอสัตว์นั้นหรือไม่?"},
+		{"id": 4, "prompt": "ภาพเคลื่อนไหวของสัตว์เหล่านั้นทำให้คุณรู้สึกตื่นตระหนกหรือไม่?"},
+		{"id": 5, "prompt": "คุณมีความกังวลอยู่ตลอดเวลาว่าจะบังเอิญเจอสัตว์นั้นในชีวิตประจำวันหรือไม่?"},
 	}
 	return c.JSON(fiber.Map{"data": questions})
 }
@@ -36,49 +39,52 @@ func SubmitAssessment(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	// 1. คำนวณคะแนนรวม
 	totalScore := 0
-	maxScore := len(input.Answers) * 5 // สมมติคะแนนเต็มข้อละ 5
+	maxScore := len(input.Answers) * 5
+
+	if maxScore == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "ไม่พบคำตอบ"})
+	}
 
 	for _, ans := range input.Answers {
 		totalScore += ans.Score
 	}
 
-	// 2. คำนวณเปอร์เซ็นต์
 	percent := (float64(totalScore) / float64(maxScore)) * 100
 
-	// 3. ตัดเกรด (Logic ตัวอย่าง)
-	fearLevel := "low"
+	fearLevel := models.FearLow
+	description := "คุณมีความกลัวในระดับต่ำ สามารถใช้ชีวิตประจำวันได้ปกติ"
 	if percent > 70 {
-		fearLevel = "high"
+		fearLevel = models.FearHigh
+		description = "ความกลัวของคุณอยู่ในระดับสูง แนะนำให้ค่อยๆ เปิดใจและทดสอบกับแอปพลิเคชันของเราอย่างต่อเนื่องเพื่อปรับตัว"
 	} else if percent > 30 {
-		fearLevel = "medium"
+		fearLevel = models.FearMedium
+		description = "คุณมีความกลัวในระดับปานกลาง ลองเรียนรู้และค่อยๆ ก้าวผ่านไปกับด่านในเกมของเรานะครับ"
 	}
 
-	// ใน func SubmitAssessment ...
-
-	// หา ID ของแบบประเมินเวอร์ชันล่าสุดมาใช้ (แทนการใส่เลข 1 ดื้อๆ)
-	var assessment models.AssessmentStore
-	if err := database.DB.Where("version = ?", 1).First(&assessment).Error; err != nil {
-		// ถ้าหาไม่เจอ ให้ default เป็น 0 หรือ handle error
-		return c.Status(500).JSON(fiber.Map{"error": "ไม่พบแบบประเมินในระบบ"})
+	var patient models.Patient
+	if err := database.DB.Where("user_id = ?", userID).First(&patient).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบข้อมูลผู้ป่วย"})
 	}
 
-	// 4. บันทึกผลลง DB
-	result := models.AssessmentResult{
-		UserID:       userID,
-		FearLevel:    fearLevel,
-		Percent:      percent,
-		AssessmentID: assessment.ID,
+	// บันทึกผลลง DB
+	result := models.Assessment{
+		PatientID:       patient.ID,
+		InitialScore:    totalScore,
+		CalculatedLevel: fearLevel,
 	}
 
 	if err := database.DB.Create(&result).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "บันทึกผลไม่สำเร็จ"})
 	}
 
+	// อัปเดต fear_level ใน Patient ด้วย
+	database.DB.Model(&patient).Update("fear_level", fearLevel)
+
 	return c.JSON(fiber.Map{
-		"message":    "ประเมินผลสำเร็จ",
-		"fear_level": fearLevel,
-		"percent":    percent,
+		"message":     "ประเมินผลสำเร็จ",
+		"fear_level":  fearLevel,
+		"percent":     percent,
+		"description": description,
 	})
 }

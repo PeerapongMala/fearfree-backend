@@ -2,81 +2,62 @@ package models
 
 import "time"
 
-// --- หมวดหมู่สัตว์ & สัตว์ ---
+type MediaType string
+
+const (
+	MediaImage MediaType = "image"
+	MediaVideo MediaType = "video"
+)
+
+type ProgressStatus string
+
+const (
+	StatusLocked     ProgressStatus = "locked"
+	StatusInProgress ProgressStatus = "in_progress"
+	StatusCompleted  ProgressStatus = "completed"
+)
+
 type AnimalCategory struct {
-	ID    uint   `json:"id" gorm:"primaryKey"`
-	Cname string `json:"cname"`
+	ID          uint     `json:"id" gorm:"primaryKey"`
+	Name        string   `json:"name" gorm:"unique"`
+	Description string   `json:"description"`
+	Animals     []Animal `json:"animals" gorm:"foreignKey:CategoryID"`
 }
 
 type Animal struct {
-	ID         uint   `json:"id" gorm:"primaryKey"`
-	Aname      string `json:"name" gorm:"column:aname"` // ชื่อใน DB คือ aname
-	CategoryID uint   `json:"category_id"`
+	ID           uint    `json:"id" gorm:"primaryKey"`
+	CategoryID   uint    `json:"category_id" gorm:"index"`
+	Name         string  `json:"name" gorm:"unique"`
+	Description  string  `json:"description"`
+	ThumbnailUrl string  `json:"thumbnail_url"`
+	Stages       []Stage `json:"stages" gorm:"foreignKey:AnimalID"`
 }
 
-// --- ไฟล์สื่อ (รูป/วิดีโอ) ---
-type MediaStore struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	MediaType string    `json:"media_type"`
-	Mime      string    `json:"mime"`
-	Checksum  string    `json:"checksum"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// --- ระบบด่าน (Gameplay) ---
 type Stage struct {
-	ID       uint `json:"id" gorm:"primaryKey"`
-	StageNo  int  `json:"stage_no"`
-	AnimalID uint `json:"animal_id"`
-	MediaID  uint `json:"media_id"`
+	ID             uint      `json:"id" gorm:"primaryKey"`
+	AnimalID       uint      `json:"animal_id" gorm:"index"`
+	StageNo        int       `json:"stage_no"`
+	MediaType      MediaType `json:"media_type" gorm:"type:media_type_enum"`
+	MediaUrl       string    `json:"media_url"`
+	DisplayTimeSec int       `json:"display_time_sec"`
+	RewardCoins    int       `json:"reward_coins"`
 
-	// Preload (จอยตาราง)
-	Media  *MediaStore `json:"media" gorm:"foreignKey:MediaID"`
-	Animal *Animal     `json:"animal" gorm:"foreignKey:AnimalID"`
+	Animal Animal `json:"animal" gorm:"foreignKey:AnimalID"`
 }
 
-type StageResult struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	UserID    uint      `json:"user_id"`
-	StageID   uint      `json:"stage_id"`
-	Answer    string    `json:"answer"`
-	UpdatedAt time.Time `json:"updated_at"`
+type PatientProgress struct {
+	ID          uint           `json:"id" gorm:"primaryKey"`
+	PatientID   uint           `json:"patient_id" gorm:"index"`
+	StageID     uint           `json:"stage_id" gorm:"index"`
+	Status      ProgressStatus `json:"status" gorm:"type:progress_status;default:'locked'"`
+	SymptomNote string         `json:"symptom_note"`
+	UnlockDate  *time.Time     `json:"unlock_date"`
+	CompletedAt *time.Time     `json:"completed_at"`
+
+	Stage Stage `json:"stage" gorm:"foreignKey:StageID"`
 }
 
-type GameRules struct {
-	ID                   uint `json:"id" gorm:"primaryKey"`
-	StageDurationSeconds int  `json:"stage_duration_seconds"`
-	CoinPerStage         int  `json:"coin_per_stage"`
-}
-
-// --- ของรางวัล (Rewards) ---
-type Reward struct {
-	ID          uint      `json:"id" gorm:"primaryKey"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CostCoins   int       `json:"cost_coins"`
-	Stock       int       `json:"stock"`
-	ImageURL    string    `json:"image_url"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-type RewardsUser struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	UserID    uint      `json:"user_id"`
-	RewardID  uint      `json:"reward_id"`
-	Status    string    `json:"status"` // 'reserved', 'fulfilled'
-	CreatedAt time.Time `json:"created_at"`
-
-	Reward *Reward `json:"reward" gorm:"foreignKey:RewardID"`
-}
-
-// ตั้งชื่อตารางให้ตรงกับ DB
-func (AnimalCategory) TableName() string { return "animal_categories" }
-func (Animal) TableName() string         { return "animal" }
-func (MediaStore) TableName() string     { return "media_store" }
-func (Stage) TableName() string          { return "stages" }
-func (StageResult) TableName() string    { return "stage_result" }
-func (GameRules) TableName() string      { return "game_rules" }
-func (Reward) TableName() string         { return "rewards" }
-func (RewardsUser) TableName() string    { return "rewards_users" }
+func (AnimalCategory) TableName() string  { return "animal_categories" }
+func (Animal) TableName() string          { return "animals" }
+func (Stage) TableName() string           { return "stages" }
+func (PatientProgress) TableName() string { return "patient_progress" }
