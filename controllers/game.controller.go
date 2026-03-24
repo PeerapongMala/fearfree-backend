@@ -7,11 +7,12 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // 1. ดึงหมวดหมู่สัตว์ (Reptiles, Insects)
 func ListAnimalCategories(c *fiber.Ctx) error {
-	var categories []models.AnimalCategory
+	categories := []models.AnimalCategory{}
 	if err := database.DB.Find(&categories).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลหมวดหมู่ไม่สำเร็จ"})
 	}
@@ -21,7 +22,7 @@ func ListAnimalCategories(c *fiber.Ctx) error {
 // 2. ดึงสัตว์ในหมวดนั้นๆ (Snake, Spider)
 func ListAnimalsByCategory(c *fiber.Ctx) error {
 	categoryId := c.Params("categoryId")
-	var animals []models.Animal
+	animals := []models.Animal{}
 	if err := database.DB.Where("category_id = ?", categoryId).Find(&animals).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลสัตว์ไม่สำเร็จ"})
 	}
@@ -31,7 +32,7 @@ func ListAnimalsByCategory(c *fiber.Ctx) error {
 // 3. ดึงด่านของสัตว์ตัวนั้น (Level 1, 2, 3)
 func ListStagesByAnimal(c *fiber.Ctx) error {
 	animalId := c.Params("animalId")
-	var stages []models.Stage
+	stages := []models.Stage{}
 
 	if err := database.DB.Where("animal_id = ?", animalId).Order("stage_no asc").Find(&stages).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลด่านไม่สำเร็จ"})
@@ -45,10 +46,13 @@ type SubmitStageInput struct {
 	SymptomNote string `json:"symptom_note"` // บันทึกอาการกลัว
 }
 
-// ✅ 4. ส่งผลการเล่น (จบด่าน) อัปเดตตาราง PatientProgress
+// 4. ส่งผลการเล่น (จบด่าน) อัปเดตตาราง PatientProgress
 func SubmitStageResult(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uint)
-	levelID, _ := c.ParamsInt("levelId")
+	levelID, err := c.ParamsInt("levelId")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "levelId ไม่ถูกต้อง"})
+	}
 	var input SubmitStageInput
 
 	if err := c.BodyParser(&input); err != nil {
@@ -69,7 +73,7 @@ func SubmitStageResult(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"message": "บันทึกผล: ยังไม่ผ่านด่าน"})
 	}
 
-	// ✅ ค้นหาด่านถัดไปของสัตว์ตัวเดิม
+	// ค้นหาด่านถัดไปของสัตว์ตัวเดิม
 	var nextStage models.Stage
 	hasNext := false
 	if err := database.DB.Where("animal_id = ? AND stage_no = ?", stage.AnimalID, stage.StageNo+1).First(&nextStage).Error; err == nil {
@@ -79,7 +83,7 @@ func SubmitStageResult(c *fiber.Ctx) error {
 	tx := database.DB.Begin()
 
 	var progress models.PatientProgress
-	result := tx.Where("patient_id = ? AND stage_id = ?", patient.ID, levelID).First(&progress)
+	result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("patient_id = ? AND stage_id = ?", patient.ID, levelID).First(&progress)
 
 	now := time.Now()
 
@@ -104,7 +108,9 @@ func SubmitStageResult(c *fiber.Ctx) error {
 			return c.Status(500).JSON(fiber.Map{"error": "อัปเดตเหรียญไม่สำเร็จ"})
 		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
+		}
 		return c.JSON(fiber.Map{
 			"success":      true,
 			"message":      "ผ่านด่านสำเร็จ! (ได้รับเหรียญรางวัล)",
@@ -121,9 +127,14 @@ func SubmitStageResult(c *fiber.Ctx) error {
 		progress.Status = models.StatusCompleted
 		progress.SymptomNote = input.SymptomNote
 		progress.CompletedAt = &now
-		tx.Save(&progress)
+		if err := tx.Save(&progress).Error; err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": "บันทึกผลไม่สำเร็จ"})
+		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
+		}
 		return c.JSON(fiber.Map{
 			"success":      true,
 			"message":      "ผ่านด่านสำเร็จ! (เคยได้รับรางวัลไปแล้ว)",

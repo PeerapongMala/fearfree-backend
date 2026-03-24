@@ -4,6 +4,9 @@ import (
 	"fearfree-backend/config"
 	"fearfree-backend/database"
 	"fearfree-backend/models"
+	"fmt"
+	"math"
+	"regexp"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -27,20 +30,49 @@ type LoginInput struct {
 	Password string `json:"password"`
 }
 
-// ✅ Signup (สมัครสมาชิก)
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+// Signup (สมัครสมาชิก)
 func Signup(c *fiber.Ctx) error {
 	var input SignupInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ส่งข้อมูลมาผิดรูปแบบ"})
 	}
 
-	// 0. Validate Password
+	// 0. Validate Username & Password
+	if len(input.Username) < 6 {
+		return c.Status(400).JSON(fiber.Map{"error": "ชื่อผู้ใช้ต้องมีความยาวอย่างน้อย 6 ตัวอักษร"})
+	}
 	if len(input.Password) < 8 {
 		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร"})
 	}
+	if len(input.Password) > 72 {
+		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีความยาวไม่เกิน 72 ตัวอักษร"})
+	}
+	if !validatePasswordComplexity(input.Password) {
+		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีตัวเลข ตัวอักษรใหญ่ และอักขระพิเศษอย่างน้อยอย่างละ 1 ตัว"})
+	}
+
+	// Validate age if provided
+	if input.Age != 0 && (input.Age < 1 || input.Age > 120) {
+		return c.Status(400).JSON(fiber.Map{"error": "อายุต้องอยู่ระหว่าง 1-120 ปี"})
+	}
+
+	// Validate email format
+	if !emailRegex.MatchString(input.Email) {
+		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบอีเมลไม่ถูกต้อง"})
+	}
+
+	// Validate FearLevel enum
+	if input.FearLevel != "" && input.FearLevel != "low" && input.FearLevel != "medium" && input.FearLevel != "high" {
+		return c.Status(400).JSON(fiber.Map{"error": "fear_level ต้องเป็น low, medium หรือ high"})
+	}
 
 	// 1. Hash Password
-	hash, _ := bcrypt.GenerateFromPassword([]byte(input.Password), 10)
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), 10)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "เข้ารหัสรหัสผ่านไม่สำเร็จ"})
+	}
 
 	// 2. เตรียมข้อมูล User ลง DB
 	user := models.User{
@@ -74,7 +106,11 @@ func Signup(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "สร้างโปรไฟล์ผู้ป่วยไม่สำเร็จ"})
 	}
 
-	tx.Commit() // บันทึกเสร็จสมบูรณ์
+	if err := tx.Commit().Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
+	}
+
+	logAudit(c, user.ID, "signup", "User signed up: "+input.Username)
 
 	return c.Status(201).JSON(fiber.Map{
 		"message": "สมัครสมาชิกสำเร็จ!",
@@ -82,40 +118,167 @@ func Signup(c *fiber.Ctx) error {
 	})
 }
 
-// ✅ Login (เข้าสู่ระบบ)
+// Login (เข้าสู่ระบบ)
 func Login(c *fiber.Ctx) error {
 	var input LoginInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
+	// ตรวจสอบ Account Lockout
+	var attempt models.LoginAttempt
+	database.DB.Where("username = ?", input.Username).FirstOrCreate(&attempt, models.LoginAttempt{Username: input.Username})
+
+	if attempt.LockedUntil != nil && attempt.LockedUntil.After(time.Now()) {
+		remaining := math.Ceil(time.Until(*attempt.LockedUntil).Minutes())
+		return c.Status(429).JSON(fiber.Map{
+			"error": fmt.Sprintf("บัญชีถูกล็อค กรุณารอ %.0f นาที", remaining),
+		})
+	}
+
 	// 1. หา User จาก Username
 	var user models.User
 	if err := database.DB.Where("username = ?", input.Username).First(&user).Error; err != nil {
+		// เพิ่มจำนวนครั้งที่ login ผิด
+		attempt.Attempts++
+		if attempt.Attempts >= 5 {
+			lockUntil := time.Now().Add(15 * time.Minute)
+			attempt.LockedUntil = &lockUntil
+		}
+		database.DB.Save(&attempt)
 		return c.Status(401).JSON(fiber.Map{"error": "ชื่อผู้ใช้หรือรหัสผ่านผิด"})
 	}
 
 	// 2. เช็ครหัสผ่านด้วย Bcrypt
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+		// เพิ่มจำนวนครั้งที่ login ผิด
+		attempt.Attempts++
+		if attempt.Attempts >= 5 {
+			lockUntil := time.Now().Add(15 * time.Minute)
+			attempt.LockedUntil = &lockUntil
+		}
+		database.DB.Save(&attempt)
 		return c.Status(401).JSON(fiber.Map{"error": "ชื่อผู้ใช้หรือรหัสผ่านผิด"})
 	}
 
-	// 3. สร้าง JWT Token
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
-	claims["user_id"] = user.ID
-	claims["role"] = user.Role
-	claims["exp"] = time.Now().Add(time.Hour * 72).Unix() // Token อยู่ได้ 3 วัน
+	// Login สำเร็จ → reset attempts
+	attempt.Attempts = 0
+	attempt.LockedUntil = nil
+	database.DB.Save(&attempt)
 
-	t, _ := token.SignedString([]byte(config.Env.JWTSecret))
+	logAudit(c, user.ID, "login", "User logged in: "+user.Username)
+
+	// 3. สร้าง Access Token (1 ชั่วโมง)
+	accessToken := jwt.New(jwt.SigningMethodHS256)
+	accessClaims := accessToken.Claims.(jwt.MapClaims)
+	accessClaims["user_id"] = user.ID
+	accessClaims["role"] = user.Role
+	accessClaims["exp"] = time.Now().Add(time.Hour * 1).Unix()
+
+	accessTokenString, err := accessToken.SignedString([]byte(config.Env.JWTSecret))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Access Token ไม่สำเร็จ"})
+	}
+
+	// 4. สร้าง Refresh Token (7 วัน)
+	refreshToken := jwt.New(jwt.SigningMethodHS256)
+	refreshClaims := refreshToken.Claims.(jwt.MapClaims)
+	refreshClaims["user_id"] = user.ID
+	refreshClaims["role"] = user.Role
+	refreshClaims["type"] = "refresh"
+	refreshClaims["exp"] = time.Now().Add(time.Hour * 24 * 7).Unix()
+
+	refreshTokenString, err := refreshToken.SignedString([]byte(config.Env.JWTSecret))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Refresh Token ไม่สำเร็จ"})
+	}
 
 	return c.JSON(fiber.Map{
-		"message": "เข้าสู่ระบบสำเร็จ",
-		"token":   t,
+		"message":       "เข้าสู่ระบบสำเร็จ",
+		"token":         accessTokenString,
+		"refresh_token": refreshTokenString,
 		"user": fiber.Map{
 			"id":       user.ID,
 			"username": user.Username,
 			"role":     user.Role,
 		},
+	})
+}
+
+// RefreshToken - ใช้ refresh token เพื่อออก access token ใหม่
+func RefreshToken(c *fiber.Ctx) error {
+	type RefreshInput struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+
+	var input RefreshInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if input.RefreshToken == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "กรุณาส่ง refresh_token"})
+	}
+
+	// ตรวจสอบ refresh token
+	token, err := jwt.Parse(input.RefreshToken, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fiber.ErrUnauthorized
+		}
+		return []byte(config.Env.JWTSecret), nil
+	})
+
+	if err != nil || !token.Valid {
+		return c.Status(401).JSON(fiber.Map{"error": "Refresh Token หมดอายุหรือไม่ถูกต้อง"})
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "Refresh Token ไม่ถูกต้อง"})
+	}
+
+	// ตรวจสอบว่าเป็น refresh token จริง
+	tokenType, _ := claims["type"].(string)
+	if tokenType != "refresh" {
+		return c.Status(401).JSON(fiber.Map{"error": "Token ประเภทไม่ถูกต้อง"})
+	}
+
+	userID, ok := claims["user_id"].(float64)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "Token ไม่มีข้อมูล user_id"})
+	}
+	role, ok := claims["role"].(string)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "Token ไม่มีข้อมูล role"})
+	}
+
+	// สร้าง Access Token ใหม่ (1 ชั่วโมง)
+	newAccessToken := jwt.New(jwt.SigningMethodHS256)
+	newAccessClaims := newAccessToken.Claims.(jwt.MapClaims)
+	newAccessClaims["user_id"] = userID
+	newAccessClaims["role"] = role
+	newAccessClaims["exp"] = time.Now().Add(time.Hour * 1).Unix()
+
+	newAccessTokenString, err := newAccessToken.SignedString([]byte(config.Env.JWTSecret))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Access Token ไม่สำเร็จ"})
+	}
+
+	// สร้าง Refresh Token ใหม่ (7 วัน)
+	newRefreshToken := jwt.New(jwt.SigningMethodHS256)
+	newRefreshClaims := newRefreshToken.Claims.(jwt.MapClaims)
+	newRefreshClaims["user_id"] = userID
+	newRefreshClaims["role"] = role
+	newRefreshClaims["type"] = "refresh"
+	newRefreshClaims["exp"] = time.Now().Add(time.Hour * 24 * 7).Unix()
+
+	newRefreshTokenString, err := newRefreshToken.SignedString([]byte(config.Env.JWTSecret))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Refresh Token ไม่สำเร็จ"})
+	}
+
+	return c.JSON(fiber.Map{
+		"token":         newAccessTokenString,
+		"refresh_token": newRefreshTokenString,
 	})
 }

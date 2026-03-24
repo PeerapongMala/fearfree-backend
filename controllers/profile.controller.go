@@ -50,7 +50,9 @@ func UpdateProfile(c *fiber.Ctx) error {
 	patient.Age = input.Age
 	patient.MostFearAnimal = input.MostFearAnimal
 
-	database.DB.Save(&patient)
+	if err := database.DB.Save(&patient).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "อัปเดตข้อมูลไม่สำเร็จ"})
+	}
 
 	return c.JSON(fiber.Map{
 		"message": "อัปเดตข้อมูลสำเร็จ",
@@ -72,8 +74,8 @@ func GetMyPlayHistory(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลประวัติการเล่นไม่สำเร็จ"})
 	}
 
-	// Transform to match frontend MyPlayHistoryItem
-	var result []fiber.Map
+	// Transform to match frontend MyPlayHistoryItem - initialize to empty slice
+	result := []fiber.Map{}
 	for _, h := range history {
 		animalName := ""
 		stageNo := 0

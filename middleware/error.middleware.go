@@ -17,11 +17,17 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	}
 
 	// Log the error internally
-	log.Printf("🔥 Error: %v", err)
+	log.Printf("Error: %v", err)
+
+	// For 500 errors, return generic message instead of raw error
+	message := err.Error()
+	if code == fiber.StatusInternalServerError {
+		message = "เกิดข้อผิดพลาดภายในระบบ"
+	}
 
 	// Send a structured JSON response back to the client
 	return c.Status(code).JSON(fiber.Map{
 		"error":   true,
-		"message": err.Error(),
+		"message": message,
 	})
 }

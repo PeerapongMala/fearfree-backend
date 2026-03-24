@@ -23,16 +23,17 @@ type User struct {
 }
 
 type Patient struct {
-	ID             uint      `json:"id" gorm:"primaryKey"`
-	UserID         uint      `json:"user_id" gorm:"uniqueIndex"`
-	FullName       string    `json:"full_name"`
-	Age            int       `json:"age"`
-	MostFearAnimal string    `json:"most_fear_animal"`
-	FearLevel      string    `json:"fear_level" gorm:"type:fear_level"`
-	Balance        int64     `json:"balance" gorm:"default:0"`
-	CodePatient    *string   `json:"code_patient" gorm:"unique"`
-	CreatedAt      time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt      time.Time `json:"updated_at" gorm:"default:CURRENT_TIMESTAMP"`
+	ID                uint      `json:"id" gorm:"primaryKey"`
+	UserID            uint      `json:"user_id" gorm:"uniqueIndex"`
+	CreatedByDoctorID uint      `json:"created_by_doctor_id" gorm:"index"`
+	FullName          string    `json:"full_name"`
+	Age               int       `json:"age"`
+	MostFearAnimal    string    `json:"most_fear_animal"`
+	FearLevel         string    `json:"fear_level" gorm:"type:fear_level"`
+	Balance           int64     `json:"balance" gorm:"default:0"`
+	CodePatient       *string   `json:"code_patient" gorm:"unique"`
+	CreatedAt         time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt         time.Time `json:"updated_at" gorm:"default:CURRENT_TIMESTAMP"`
 }
 
 func (User) TableName() string    { return "users" }
