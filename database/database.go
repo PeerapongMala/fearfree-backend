@@ -14,14 +14,21 @@ import (
 var DB *gorm.DB
 
 func ConnectDB() {
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Bangkok",
-		config.Env.DBHost,
-		config.Env.DBUser,
-		config.Env.DBPassword,
-		config.Env.DBName,
-		config.Env.DBPort,
-	)
+	var dsn string
+	if config.Env.DatabaseURL != "" {
+		// Render / production: use DATABASE_URL directly
+		dsn = config.Env.DatabaseURL
+	} else {
+		// Local development: build DSN from individual env vars
+		dsn = fmt.Sprintf(
+			"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Bangkok",
+			config.Env.DBHost,
+			config.Env.DBUser,
+			config.Env.DBPassword,
+			config.Env.DBName,
+			config.Env.DBPort,
+		)
+	}
 
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{

@@ -1,0 +1,7 @@
+.env
+.git
+.claude
+cmd/
+*.log
+*.txt
+*.png
