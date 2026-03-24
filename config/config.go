@@ -15,6 +15,7 @@ type Config struct {
 	DBPassword   string
 	DBName       string
 	DBPort       string
+	DatabaseURL  string
 	JWTSecret    string
 }
 
@@ -34,6 +35,7 @@ func LoadConfig() {
 		DBPassword:   getEnvOrDefault("DB_PASSWORD", ""),
 		DBName:       getEnvOrDefault("DB_NAME", "fearfree"),
 		DBPort:       getEnvOrDefault("DB_PORT", "5432"),
+		DatabaseURL:  getEnvOrDefault("DATABASE_URL", ""),
 		JWTSecret:    getEnvOrDefault("JWT_SECRET", ""),
 	}
 
