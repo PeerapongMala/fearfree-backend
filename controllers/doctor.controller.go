@@ -4,19 +4,23 @@ import (
 	"fearfree-backend/database"
 	"fearfree-backend/models"
 	"fmt"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // 1. GET /doctor/patients
 func GetPatients(c *fiber.Ctx) error {
+	doctorUserID := c.Locals("user_id").(uint)
+
 	var patients []models.Patient
-	if err := database.DB.Order("created_at desc").Find(&patients).Error; err != nil {
+	if err := database.DB.Where("created_by_doctor_id = ?", doctorUserID).Order("created_at desc").Find(&patients).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ไม่สามารถดึงข้อมูลผู้ป่วยได้"})
 	}
 
-	var result []fiber.Map
+	result := []fiber.Map{}
 	for _, p := range patients {
 		code := ""
 		if p.CodePatient != nil {
@@ -35,9 +39,9 @@ func GetPatients(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"data": result})
 }
 
-func generateCodePatient() string {
+func generateCodePatient(tx *gorm.DB) string {
 	var count int64
-	database.DB.Model(&models.Patient{}).Count(&count)
+	tx.Model(&models.Patient{}).Count(&count)
 	return fmt.Sprintf("CHBCD%04d", count+1)
 }
 
@@ -48,79 +52,164 @@ type CreatePatientInput struct {
 
 // 2. POST /doctor/patients
 func CreatePatientDoctor(c *fiber.Ctx) error {
+	doctorUserID := c.Locals("user_id").(uint)
+
 	var input CreatePatientInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	tx := database.DB.Begin()
-
-	codePatient := generateCodePatient()
-	passwordHash, _ := bcrypt.GenerateFromPassword([]byte(codePatient), 10)
-
-	user := models.User{
-		Username:     codePatient,
-		Email:        fmt.Sprintf("%s@fearfree.local", codePatient),
-		PasswordHash: string(passwordHash),
-		Role:         models.RolePatient,
+	// Validate required fields
+	if strings.TrimSpace(input.FullName) == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "กรุณาระบุชื่อผู้ป่วย (full_name)"})
+	}
+	if strings.TrimSpace(input.MostFearAnimal) == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "กรุณาระบุสัตว์ที่กลัวที่สุด (most_fear_animal)"})
 	}
 
-	if err := tx.Create(&user).Error; err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "สร้าง User ไม่สำเร็จ"})
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		tx := database.DB.Begin()
+
+		codePatient := generateCodePatient(tx)
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(codePatient), 10)
+		if err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": "เข้ารหัสรหัสผ่านไม่สำเร็จ"})
+		}
+
+		user := models.User{
+			Username:     codePatient,
+			Email:        fmt.Sprintf("%s@fearfree.local", codePatient),
+			PasswordHash: string(passwordHash),
+			Role:         models.RolePatient,
+		}
+
+		if err := tx.Create(&user).Error; err != nil {
+			tx.Rollback()
+			// Retry on unique constraint violation (race condition on code)
+			if attempt < maxRetries-1 {
+				continue
+			}
+			return c.Status(500).JSON(fiber.Map{"error": "สร้าง User ไม่สำเร็จ"})
+		}
+
+		patient := models.Patient{
+			UserID:            user.ID,
+			CreatedByDoctorID: doctorUserID,
+			FullName:          input.FullName,
+			MostFearAnimal:    input.MostFearAnimal,
+			FearLevel:         "medium", // Default
+			CodePatient:       &codePatient,
+		}
+
+		if err := tx.Create(&patient).Error; err != nil {
+			tx.Rollback()
+			if attempt < maxRetries-1 {
+				continue
+			}
+			return c.Status(500).JSON(fiber.Map{"error": "สร้าง Patient ไม่สำเร็จ"})
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			if attempt < maxRetries-1 {
+				continue
+			}
+			return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
+		}
+
+		logAudit(c, doctorUserID, "create_patient", fmt.Sprintf("Created patient: %s (code: %s)", input.FullName, codePatient))
+
+		return c.Status(201).JSON(fiber.Map{
+			"success": true,
+			"data": fiber.Map{
+				"id":               patient.ID,
+				"full_name":        patient.FullName,
+				"fear_level":       patient.FearLevel,
+				"most_fear_animal": patient.MostFearAnimal,
+				"code_patient":     codePatient,
+				"created_at":       patient.CreatedAt.Format("02 Jan 2006"),
+			},
+		})
 	}
 
-	patient := models.Patient{
-		UserID:         user.ID,
-		FullName:       input.FullName,
-		MostFearAnimal: input.MostFearAnimal,
-		FearLevel:      "ปานกลาง", // Default
-		CodePatient:    &codePatient,
+	return c.Status(500).JSON(fiber.Map{"error": "สร้าง Patient ไม่สำเร็จหลังจากลองหลายครั้ง"})
+}
+
+// helper: verify patient belongs to the requesting doctor
+func getPatientOwnedByDoctor(c *fiber.Ctx) (*models.Patient, error) {
+	doctorUserID := c.Locals("user_id").(uint)
+	patientID, err := c.ParamsInt("id")
+	if err != nil {
+		return nil, c.Status(400).JSON(fiber.Map{"error": "id ไม่ถูกต้อง"})
 	}
 
-	if err := tx.Create(&patient).Error; err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Patient ไม่สำเร็จ"})
+	var patient models.Patient
+	if err := database.DB.First(&patient, patientID).Error; err != nil {
+		return nil, c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ป่วย"})
 	}
 
-	tx.Commit()
+	if patient.CreatedByDoctorID != doctorUserID {
+		return nil, c.Status(403).JSON(fiber.Map{"error": "ไม่มีสิทธิ์เข้าถึงข้อมูลผู้ป่วยรายนี้"})
+	}
 
-	return c.Status(201).JSON(fiber.Map{
-		"success": true,
-		"data": fiber.Map{
-			"id":               patient.ID,
-			"full_name":        patient.FullName,
-			"fear_level":       patient.FearLevel,
-			"most_fear_animal": patient.MostFearAnimal,
-			"code_patient":     codePatient,
-			"created_at":       patient.CreatedAt.Format("02 Jan 2006"),
-		},
-	})
+	return &patient, nil
 }
 
 // 3. DELETE /doctor/patients/:id
 func DeletePatient(c *fiber.Ctx) error {
-	patientID, _ := c.ParamsInt("id")
-
-	var patient models.Patient
-	if err := database.DB.First(&patient, patientID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ป่วย"})
+	patient, err := getPatientOwnedByDoctor(c)
+	if err != nil {
+		return err
 	}
 
-	// Delete associated user
-	database.DB.Delete(&models.User{}, patient.UserID)
-	database.DB.Delete(&patient)
+	tx := database.DB.Begin()
+
+	// Delete related data first
+	if err := tx.Where("patient_id = ?", patient.ID).Delete(&models.PatientProgress{}).Error; err != nil {
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{"error": "ลบข้อมูลความก้าวหน้าไม่สำเร็จ"})
+	}
+	if err := tx.Where("patient_id = ?", patient.ID).Delete(&models.Assessment{}).Error; err != nil {
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{"error": "ลบข้อมูลการประเมินไม่สำเร็จ"})
+	}
+	if err := tx.Where("patient_id = ?", patient.ID).Delete(&models.RedemptionHistory{}).Error; err != nil {
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{"error": "ลบข้อมูลประวัติการแลกรางวัลไม่สำเร็จ"})
+	}
+
+	// Delete UserHospital records for this user
+	if err := tx.Where("user_id = ?", patient.UserID).Delete(&models.UserHospital{}).Error; err != nil {
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{"error": "ลบข้อมูลโรงพยาบาลไม่สำเร็จ"})
+	}
+
+	// Delete patient and user
+	if err := tx.Delete(&patient).Error; err != nil {
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{"error": "ลบผู้ป่วยไม่สำเร็จ"})
+	}
+	if err := tx.Delete(&models.User{}, patient.UserID).Error; err != nil {
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{"error": "ลบ User ไม่สำเร็จ"})
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
+	}
+
+	doctorUserID := c.Locals("user_id").(uint)
+	logAudit(c, doctorUserID, "delete_patient", fmt.Sprintf("Deleted patient ID: %d", patient.ID))
 
 	return c.JSON(fiber.Map{"success": true})
 }
 
 // 4. GET /doctor/patients/:id/history (Play History % per animal)
 func GetPatientPlayHistoryAggregated(c *fiber.Ctx) error {
-	patientID, _ := c.ParamsInt("id")
-
-	var patient models.Patient
-	if err := database.DB.First(&patient, patientID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ป่วย"})
+	patient, err := getPatientOwnedByDoctor(c)
+	if err != nil {
+		return err
 	}
 
 	// 1. Fetch all animals and their total stages
@@ -142,7 +231,7 @@ func GetPatientPlayHistoryAggregated(c *fiber.Ctx) error {
 	}
 
 	// Calculate %
-	var historyList []fiber.Map
+	historyList := []fiber.Map{}
 	for _, a := range animals {
 		total := len(a.Stages)
 		completed := completedByAnimal[a.ID]
@@ -176,19 +265,17 @@ func GetPatientPlayHistoryAggregated(c *fiber.Ctx) error {
 
 // 5. GET /doctor/patients/:id/test-history (Symptom notes per stage)
 func GetPatientTestHistoryNotes(c *fiber.Ctx) error {
-	patientID, _ := c.ParamsInt("id")
-
-	var patient models.Patient
-	if err := database.DB.First(&patient, patientID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ป่วย"})
+	patient, err := getPatientOwnedByDoctor(c)
+	if err != nil {
+		return err
 	}
 
 	var progress []models.PatientProgress
-	if err := database.DB.Preload("Stage").Preload("Stage.Animal").Where("patient_id = ?", patientID).Where("symptom_note != ?", "").Order("completed_at desc").Find(&progress).Error; err != nil {
+	if err := database.DB.Preload("Stage").Preload("Stage.Animal").Where("patient_id = ?", patient.ID).Where("symptom_note != ?", "").Order("completed_at desc").Find(&progress).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลประวัติไม่สำเร็จ"})
 	}
 
-	var testHistory []fiber.Map
+	testHistory := []fiber.Map{}
 	for _, p := range progress {
 		animalName := ""
 		stageNo := 0
@@ -235,11 +322,9 @@ func GetPatientTestHistoryNotes(c *fiber.Ctx) error {
 
 // 6. GET /doctor/patients/:id/redemptions (Reward Redemptions)
 func GetPatientRedemptionsDoc(c *fiber.Ctx) error {
-	patientID, _ := c.ParamsInt("id")
-
-	var patient models.Patient
-	if err := database.DB.First(&patient, patientID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ป่วย"})
+	patient, err := getPatientOwnedByDoctor(c)
+	if err != nil {
+		return err
 	}
 
 	var histories []models.RedemptionHistory
@@ -247,7 +332,7 @@ func GetPatientRedemptionsDoc(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลประวัติการแลกรางวัลไม่สำเร็จ"})
 	}
 
-	var redemptions []fiber.Map
+	redemptions := []fiber.Map{}
 	for _, r := range histories {
 		redemptions = append(redemptions, fiber.Map{
 			"id":          r.ID,

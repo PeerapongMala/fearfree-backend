@@ -47,8 +47,8 @@ type Stage struct {
 
 type PatientProgress struct {
 	ID          uint           `json:"id" gorm:"primaryKey"`
-	PatientID   uint           `json:"patient_id" gorm:"index"`
-	StageID     uint           `json:"stage_id" gorm:"index"`
+	PatientID   uint           `json:"patient_id" gorm:"uniqueIndex:idx_patient_stage"`
+	StageID     uint           `json:"stage_id" gorm:"uniqueIndex:idx_patient_stage"`
 	Status      ProgressStatus `json:"status" gorm:"type:progress_status;default:'locked'"`
 	SymptomNote string         `json:"symptom_note"`
 	UnlockDate  *time.Time     `json:"unlock_date"`

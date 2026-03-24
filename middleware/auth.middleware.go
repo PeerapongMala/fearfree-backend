@@ -16,7 +16,10 @@ func Protect(c *fiber.Ctx) error {
 	}
 
 	// ตัดคำว่า "Bearer " ออก ให้เหลือแต่ตัว Token เพียวๆ
-	tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return c.Status(401).JSON(fiber.Map{"error": "รูปแบบ Token ไม่ถูกต้อง"})
+	}
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// 2. ตรวจสอบความถูกต้องของ Token
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -33,13 +36,27 @@ func Protect(c *fiber.Ctx) error {
 
 	// 3. แกะข้อมูลใน Token (Claims) ออกมาใช้งาน
 	claims, ok := token.Claims.(jwt.MapClaims)
-	if ok && token.Valid {
-		// เก็บ UserID และ Role ไว้ใน Context (เพื่อให้ Controller ตัวถัดไปเอาไปใช้ได้)
-		// หมายเหตุ: JWT เก็บตัวเลขเป็น float64 ต้องแปลงเป็น uint
-		userID := uint(claims["user_id"].(float64))
-		c.Locals("user_id", userID)
-		c.Locals("role", claims["role"])
+	if !ok || !token.Valid {
+		return c.Status(401).JSON(fiber.Map{"error": "Token ไม่ถูกต้อง"})
 	}
+
+	// ใช้ comma-ok pattern เพื่อป้องกัน panic
+	userIDRaw, ok := claims["user_id"]
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "Token ไม่มีข้อมูล user_id"})
+	}
+	userIDFloat, ok := userIDRaw.(float64)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "Token user_id ไม่ถูกต้อง"})
+	}
+
+	roleRaw, ok := claims["role"]
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "Token ไม่มีข้อมูล role"})
+	}
+
+	c.Locals("user_id", uint(userIDFloat))
+	c.Locals("role", roleRaw)
 
 	// 4. ผ่านด่านได้! ไปทำฟังก์ชันถัดไป
 	return c.Next()
@@ -49,6 +66,14 @@ func IsAdmin(c *fiber.Ctx) error {
 	role := c.Locals("role")
 	if role != "admin" {
 		return c.Status(403).JSON(fiber.Map{"error": "ไม่มีสิทธิ์เข้าถึง (Admin Only)"})
+	}
+	return c.Next()
+}
+
+func IsDoctor(c *fiber.Ctx) error {
+	role := c.Locals("role")
+	if role != "doctor" {
+		return c.Status(403).JSON(fiber.Map{"error": "ไม่มีสิทธิ์เข้าถึง (Doctor Only)"})
 	}
 	return c.Next()
 }

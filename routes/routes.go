@@ -3,16 +3,22 @@ package routes
 import (
 	"fearfree-backend/controllers"
 	"fearfree-backend/middleware"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
 func Setup(app *fiber.App) {
 	api := app.Group("/api/v1")
 
-	auth := api.Group("/auth")
+	auth := api.Group("/auth", limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+	}))
 	auth.Post("/signup", controllers.Signup)
 	auth.Post("/login", controllers.Login)
+	auth.Post("/refresh", controllers.RefreshToken)
 
 	// Users endpoints (Moved from Auth)
 	users := api.Group("/users", middleware.Protect)
@@ -40,7 +46,7 @@ func Setup(app *fiber.App) {
 	hospitals.Post("/select", controllers.SelectHospital) // เลือกสังกัด
 	hospitals.Get("/me", controllers.GetMyHospital)       // ดูสังกัดของฉัน
 
-	doctor := api.Group("/doctor", middleware.Protect)
+	doctor := api.Group("/doctor", middleware.Protect, middleware.IsDoctor)
 	doctor.Get("/patients", controllers.GetPatients)
 	doctor.Post("/patients", controllers.CreatePatientDoctor)
 	doctor.Delete("/patients/:id", controllers.DeletePatient)
@@ -69,4 +75,7 @@ func Setup(app *fiber.App) {
 	admin.Post("/stages", controllers.AdminCreateStage)
 	admin.Put("/stages/:id", controllers.AdminUpdateStage)
 	admin.Delete("/stages/:id", controllers.AdminDeleteStage)
+
+	// Audit Logs
+	admin.Get("/audit-logs", controllers.AdminGetAuditLogs)
 }

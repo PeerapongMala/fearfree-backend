@@ -34,7 +34,11 @@ func LoadConfig() {
 		DBPassword:   getEnvOrDefault("DB_PASSWORD", ""),
 		DBName:       getEnvOrDefault("DB_NAME", "fearfree"),
 		DBPort:       getEnvOrDefault("DB_PORT", "5432"),
-		JWTSecret:    getEnvOrDefault("JWT_SECRET", "supersecretkey"),
+		JWTSecret:    getEnvOrDefault("JWT_SECRET", ""),
+	}
+
+	if Env.JWTSecret == "" || Env.JWTSecret == "supersecretkey" {
+		log.Fatal("FATAL: JWT_SECRET environment variable must be set to a secure value (not empty or 'supersecretkey')")
 	}
 }
 
