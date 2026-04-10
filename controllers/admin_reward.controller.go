@@ -112,21 +112,9 @@ func AdminDeleteReward(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบของรางวัล"})
 	}
 
-	tx := database.DB.Begin()
-
-	// ลบประวัติการแลกที่เชื่อมโยงก่อน
-	if err := tx.Where("reward_id = ?", rewardID).Delete(&models.RedemptionHistory{}).Error; err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "ลบประวัติการแลกรางวัลไม่สำเร็จ"})
-	}
-
-	if err := tx.Delete(&reward).Error; err != nil {
-		tx.Rollback()
+	// Redemption history is preserved as historical data; only delete the reward
+	if err := database.DB.Delete(&reward).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ลบของรางวัลไม่สำเร็จ"})
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
 	}
 
 	adminID := c.Locals("user_id").(uint)

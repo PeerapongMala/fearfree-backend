@@ -4,6 +4,7 @@ import (
 	"fearfree-backend/database"
 	"fearfree-backend/models"
 	"fmt"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -11,15 +12,30 @@ import (
 
 // 1. ดึงรายการของรางวัลทั้งหมด
 func ListRewards(c *fiber.Ctx) error {
-	var rewards []models.Reward
-	if rewards == nil {
-		rewards = []models.Reward{}
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	if page < 1 {
+		page = 1
 	}
-	// เรียงตามราคา
-	if err := database.DB.Order("cost_coins asc").Find(&rewards).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลรางวัลไม่สำเร็จ"})
+	if limit < 1 || limit > 100 {
+		limit = 20
 	}
-	return c.JSON(fiber.Map{"data": rewards})
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.Reward{}).Count(&total)
+
+	rewards := []models.Reward{}
+	if err := database.DB.Order("cost_coins asc").Offset(offset).Limit(limit).Find(&rewards).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"success": false, "error": "ดึงข้อมูลรางวัลไม่สำเร็จ"})
+	}
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    rewards,
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
+	})
 }
 
 // 2. แลกของรางวัล (ตัดเหรียญ + ตัดสต็อก)

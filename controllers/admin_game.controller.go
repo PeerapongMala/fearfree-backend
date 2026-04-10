@@ -79,22 +79,7 @@ func AdminDeleteCategory(c *fiber.Ctx) error {
 	}
 
 	for _, animal := range animals {
-		// Find all stages for this animal
-		var stages []models.Stage
-		if err := tx.Where("animal_id = ?", animal.ID).Find(&stages).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลด่านไม่สำเร็จ"})
-		}
-
-		for _, stage := range stages {
-			// Delete patient progress for each stage
-			if err := tx.Where("stage_id = ?", stage.ID).Delete(&models.PatientProgress{}).Error; err != nil {
-				tx.Rollback()
-				return c.Status(500).JSON(fiber.Map{"error": "ลบข้อมูลความก้าวหน้าไม่สำเร็จ"})
-			}
-		}
-
-		// Delete all stages for this animal
+		// Delete all stages for this animal (patient progress is preserved as historical data)
 		if err := tx.Where("animal_id = ?", animal.ID).Delete(&models.Stage{}).Error; err != nil {
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": "ลบด่านไม่สำเร็จ"})
@@ -198,22 +183,7 @@ func AdminDeleteAnimal(c *fiber.Ctx) error {
 
 	tx := database.DB.Begin()
 
-	// Find all stages for this animal
-	var stages []models.Stage
-	if err := tx.Where("animal_id = ?", animal.ID).Find(&stages).Error; err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลด่านไม่สำเร็จ"})
-	}
-
-	for _, stage := range stages {
-		// Delete patient progress for each stage
-		if err := tx.Where("stage_id = ?", stage.ID).Delete(&models.PatientProgress{}).Error; err != nil {
-			tx.Rollback()
-			return c.Status(500).JSON(fiber.Map{"error": "ลบข้อมูลความก้าวหน้าไม่สำเร็จ"})
-		}
-	}
-
-	// Delete all stages for this animal
+	// Delete all stages for this animal (patient progress is preserved as historical data)
 	if err := tx.Where("animal_id = ?", animal.ID).Delete(&models.Stage{}).Error; err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "ลบด่านไม่สำเร็จ"})
@@ -328,11 +298,7 @@ func AdminDeleteStage(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบด่าน"})
 	}
 
-	// Delete patient progress for this stage first
-	if err := database.DB.Where("stage_id = ?", stage.ID).Delete(&models.PatientProgress{}).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ลบข้อมูลความก้าวหน้าไม่สำเร็จ"})
-	}
-
+	// Patient progress is preserved as historical data; only delete the stage
 	if err := database.DB.Delete(&stage).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ลบด่านไม่สำเร็จ"})
 	}

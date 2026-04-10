@@ -1,23 +1,38 @@
 package controllers
 
 import (
+	"crypto/rand"
 	"fearfree-backend/database"
 	"fearfree-backend/models"
 	"fmt"
+	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 // 1. GET /doctor/patients
 func GetPatients(c *fiber.Ctx) error {
 	doctorUserID := c.Locals("user_id").(uint)
 
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.Patient{}).Where("created_by_doctor_id = ?", doctorUserID).Count(&total)
+
 	var patients []models.Patient
-	if err := database.DB.Where("created_by_doctor_id = ?", doctorUserID).Order("created_at desc").Find(&patients).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ไม่สามารถดึงข้อมูลผู้ป่วยได้"})
+	if err := database.DB.Where("created_by_doctor_id = ?", doctorUserID).Order("created_at desc").Offset(offset).Limit(limit).Find(&patients).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"success": false, "error": "ไม่สามารถดึงข้อมูลผู้ป่วยได้"})
 	}
 
 	result := []fiber.Map{}
@@ -36,13 +51,27 @@ func GetPatients(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(fiber.Map{"data": result})
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    result,
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
+	})
 }
 
-func generateCodePatient(tx *gorm.DB) string {
-	var count int64
-	tx.Model(&models.Patient{}).Count(&count)
-	return fmt.Sprintf("CHBCD%04d", count+1)
+const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no 0/O/1/I to avoid confusion
+
+func generateCodePatient() (string, error) {
+	b := make([]byte, 8)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(codeAlphabet))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = codeAlphabet[n.Int64()]
+	}
+	return string(b), nil
 }
 
 type CreatePatientInput struct {
@@ -67,16 +96,25 @@ func CreatePatientDoctor(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "กรุณาระบุสัตว์ที่กลัวที่สุด (most_fear_animal)"})
 	}
 
-	const maxRetries = 3
+	const maxRetries = 5
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		tx := database.DB.Begin()
-
-		codePatient := generateCodePatient(tx)
-		passwordHash, err := bcrypt.GenerateFromPassword([]byte(codePatient), 10)
+		codePatient, err := generateCodePatient()
 		if err != nil {
-			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": "สร้างรหัสผู้ป่วยไม่สำเร็จ"})
+		}
+
+		// Generate a separate random password (8 chars)
+		password, err := generateCodePatient()
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "สร้างรหัสผ่านไม่สำเร็จ"})
+		}
+
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), 10)
+		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "เข้ารหัสรหัสผ่านไม่สำเร็จ"})
 		}
+
+		tx := database.DB.Begin()
 
 		user := models.User{
 			Username:     codePatient,
@@ -87,7 +125,7 @@ func CreatePatientDoctor(c *fiber.Ctx) error {
 
 		if err := tx.Create(&user).Error; err != nil {
 			tx.Rollback()
-			// Retry on unique constraint violation (race condition on code)
+			// Retry on unique constraint violation (unlikely with random codes)
 			if attempt < maxRetries-1 {
 				continue
 			}
@@ -128,6 +166,7 @@ func CreatePatientDoctor(c *fiber.Ctx) error {
 				"fear_level":       patient.FearLevel,
 				"most_fear_animal": patient.MostFearAnimal,
 				"code_patient":     codePatient,
+				"password":         password,
 				"created_at":       patient.CreatedAt.Format("02 Jan 2006"),
 			},
 		})

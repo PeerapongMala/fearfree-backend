@@ -20,8 +20,8 @@ func GetProfile(c *fiber.Ctx) error {
 
 	// 3. ส่งข้อมูลกลับ
 	return c.JSON(fiber.Map{
-		"status": "success",
-		"data":   user,
+		"success": true,
+		"data":    user,
 	})
 }
 
@@ -40,6 +40,17 @@ func UpdateProfile(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
+	// Validate input fields
+	if len(input.FullName) > 100 {
+		return c.Status(400).JSON(fiber.Map{"error": "ชื่อต้องมีความยาวไม่เกิน 100 ตัวอักษร"})
+	}
+	if input.Age != 0 && (input.Age < 1 || input.Age > 120) {
+		return c.Status(400).JSON(fiber.Map{"error": "อายุต้องอยู่ระหว่าง 1-120 ปี"})
+	}
+	if len(input.MostFearAnimal) > 100 {
+		return c.Status(400).JSON(fiber.Map{"error": "ชื่อสัตว์ต้องมีความยาวไม่เกิน 100 ตัวอักษร"})
+	}
+
 	var patient models.Patient
 	if err := database.DB.Where("user_id = ?", userID).First(&patient).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบข้อมูลโปรไฟล์ผู้ป่วย"})
@@ -55,6 +66,7 @@ func UpdateProfile(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
+		"success": true,
 		"message": "อัปเดตข้อมูลสำเร็จ",
 		"data":    patient,
 	})

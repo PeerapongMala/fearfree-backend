@@ -3,26 +3,18 @@ package controllers
 import (
 	"fearfree-backend/database"
 	"fearfree-backend/models"
+	"fmt"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 // GET /assessment/v1 (ดึงคำถาม)
 func GetAssessments(c *fiber.Ctx) error {
-	// ชุดคำถามประเมินระดับความกลัว 10 ข้อ
-	questions := []fiber.Map{
-		{"id": 1, "prompt": "คุณรู้สึกกลัวเมื่อเห็นรูปภาพของสัตว์ที่คุณกลัวมากน้อยเพียงใด? หลังจากนี้จะได้ทำความคุ้นเคยในการใช้แอปพลิเคชัน"},
-		{"id": 2, "prompt": "คุณรู้สึกใจสั่นเมื่ออยู่ในที่ที่คิดว่าสัตว์ที่คุณกลัวอาจจะอยู่หรือไม่? คุณเคยลองเข้าใกล้สัตว์ที่กลัวแล้วรู้สึกอย่างไรบ้าง?"},
-		{"id": 3, "prompt": "คุณเคยมีอาการทางกายเมื่อเจอสัตว์หรือนึกถึงสัตว์ที่กลัว เช่น ใจสั่น เหงื่อออก หายใจลำบาก หรือไม่?"},
-		{"id": 4, "prompt": "คุณสามารถดูวิดีโอหรือภาพเคลื่อนไหวของสัตว์ที่คุณกลัวได้โดยไม่รู้สึกตื่นตระหนกหรือไม่?"},
-		{"id": 5, "prompt": "คุณหลีกเลี่ยงการไปสถานที่บางแห่งเนื่องจากกลัวว่าจะเจอสัตว์นั้นมากน้อยเพียงใด?"},
-		{"id": 6, "prompt": "คุณรู้สึกปลอดภัยเมื่อพูดคุยเกี่ยวกับสัตว์ที่คุณกลัวกับคนรอบข้างหรือไม่? ความรู้สึกที่ได้เป็นอย่างไรบ้าง?"},
-		{"id": 7, "prompt": "คุณเคยได้รับความรู้เกี่ยวกับสัตว์ที่กลัว และรู้สึกว่าความรู้เหล่านั้นช่วยลดความกลัวได้บ้างหรือไม่?"},
-		{"id": 8, "prompt": "คุณรู้สึกว่าความกลัวสัตว์ส่งผลกระทบต่อการใช้ชีวิตประจำวันของคุณมากน้อยเพียงใด?"},
-		{"id": 9, "prompt": "คุณรับมือกับสถานการณ์ที่ต้องเผชิญหน้ากับสัตว์ที่กลัว เช่น การเดินผ่านสุนัขข้างทางได้ดีเพียงใด?"},
-		{"id": 10, "prompt": "คุณสังเกตว่าความกลัวสัตว์ของตัวเองมีการเปลี่ยนแปลงไปจากเดิมหรือไม่?"},
+	questions := []models.Question{}
+	if err := database.DB.Order("sort_order asc").Find(&questions).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"success": false, "error": "ดึงข้อมูลคำถามไม่สำเร็จ"})
 	}
-	return c.JSON(fiber.Map{"data": questions})
+	return c.JSON(fiber.Map{"success": true, "data": questions})
 }
 
 // Input สำหรับส่งคำตอบ
@@ -41,19 +33,21 @@ func SubmitAssessment(c *fiber.Ctx) error {
 	var input SubmitAssessmentInput
 
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+		return c.Status(400).JSON(fiber.Map{"success": false, "error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	// Validate exactly 10 answers
-	if len(input.Answers) != 10 {
-		return c.Status(400).JSON(fiber.Map{"error": "ต้องตอบคำถามครบ 10 ข้อ"})
+	// Validate answer count matches the number of questions in DB
+	var questionCount int64
+	database.DB.Model(&models.Question{}).Count(&questionCount)
+	if int64(len(input.Answers)) != questionCount {
+		return c.Status(400).JSON(fiber.Map{"success": false, "error": fmt.Sprintf("ต้องตอบคำถามครบ %d ข้อ", questionCount)})
 	}
 
 	// Validate no duplicate question IDs
 	seenIDs := make(map[uint]bool)
 	for _, ans := range input.Answers {
 		if seenIDs[ans.QuestionID] {
-			return c.Status(400).JSON(fiber.Map{"error": "พบ question_id ซ้ำ"})
+			return c.Status(400).JSON(fiber.Map{"success": false, "error": "พบ question_id ซ้ำ"})
 		}
 		seenIDs[ans.QuestionID] = true
 	}
@@ -63,7 +57,7 @@ func SubmitAssessment(c *fiber.Ctx) error {
 
 	for _, ans := range input.Answers {
 		if ans.Score < 0 || ans.Score > 10 {
-			return c.Status(400).JSON(fiber.Map{"error": "คะแนนแต่ละข้อต้องอยู่ระหว่าง 0-10"})
+			return c.Status(400).JSON(fiber.Map{"success": false, "error": "คะแนนแต่ละข้อต้องอยู่ระหว่าง 0-10"})
 		}
 		totalScore += ans.Score
 	}
@@ -82,7 +76,7 @@ func SubmitAssessment(c *fiber.Ctx) error {
 
 	var patient models.Patient
 	if err := database.DB.Where("user_id = ?", userID).First(&patient).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบข้อมูลผู้ป่วย"})
+		return c.Status(404).JSON(fiber.Map{"success": false, "error": "ไม่พบข้อมูลผู้ป่วย"})
 	}
 
 	// บันทึกผลลง DB
@@ -93,16 +87,19 @@ func SubmitAssessment(c *fiber.Ctx) error {
 	}
 
 	if err := database.DB.Create(&result).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "บันทึกผลไม่สำเร็จ"})
+		return c.Status(500).JSON(fiber.Map{"success": false, "error": "บันทึกผลไม่สำเร็จ"})
 	}
 
 	// อัปเดต fear_level ใน Patient ด้วย
 	database.DB.Model(&patient).Update("fear_level", fearLevel)
 
 	return c.JSON(fiber.Map{
+		"success":     true,
 		"message":     "ประเมินผลสำเร็จ",
-		"fear_level":  fearLevel,
-		"percent":     percent,
-		"description": description,
+		"data": fiber.Map{
+			"fear_level":  fearLevel,
+			"percent":     percent,
+			"description": description,
+		},
 	})
 }

@@ -19,6 +19,7 @@ func Setup(app *fiber.App) {
 	auth.Post("/signup", controllers.Signup)
 	auth.Post("/login", controllers.Login)
 	auth.Post("/refresh", controllers.RefreshToken)
+	auth.Post("/logout", middleware.Protect, controllers.Logout)
 
 	// Users endpoints (Moved from Auth)
 	users := api.Group("/users", middleware.Protect)

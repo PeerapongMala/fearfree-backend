@@ -3,6 +3,7 @@ package controllers
 import (
 	"fearfree-backend/database"
 	"fearfree-backend/models"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -12,21 +13,60 @@ import (
 
 // 1. ดึงหมวดหมู่สัตว์ (Reptiles, Insects)
 func ListAnimalCategories(c *fiber.Ctx) error {
-	categories := []models.AnimalCategory{}
-	if err := database.DB.Find(&categories).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลหมวดหมู่ไม่สำเร็จ"})
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	if page < 1 {
+		page = 1
 	}
-	return c.JSON(fiber.Map{"data": categories})
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.AnimalCategory{}).Count(&total)
+
+	categories := []models.AnimalCategory{}
+	if err := database.DB.Offset(offset).Limit(limit).Find(&categories).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"success": false, "error": "ดึงข้อมูลหมวดหมู่ไม่สำเร็จ"})
+	}
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    categories,
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
+	})
 }
 
 // 2. ดึงสัตว์ในหมวดนั้นๆ (Snake, Spider)
 func ListAnimalsByCategory(c *fiber.Ctx) error {
 	categoryId := c.Params("categoryId")
-	animals := []models.Animal{}
-	if err := database.DB.Where("category_id = ?", categoryId).Find(&animals).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลสัตว์ไม่สำเร็จ"})
+
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	if page < 1 {
+		page = 1
 	}
-	return c.JSON(fiber.Map{"data": animals})
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.Animal{}).Where("category_id = ?", categoryId).Count(&total)
+
+	animals := []models.Animal{}
+	if err := database.DB.Where("category_id = ?", categoryId).Offset(offset).Limit(limit).Find(&animals).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"success": false, "error": "ดึงข้อมูลสัตว์ไม่สำเร็จ"})
+	}
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    animals,
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
+	})
 }
 
 // 3. ดึงด่านของสัตว์ตัวนั้น (Level 1, 2, 3)

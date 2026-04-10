@@ -1,6 +1,9 @@
 package controllers
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fearfree-backend/config"
 	"fearfree-backend/database"
 	"fearfree-backend/models"
@@ -31,6 +34,31 @@ type LoginInput struct {
 }
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+// hashToken returns a hex-encoded SHA-256 hash of the token string.
+func hashToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+// generateTokenID creates a random 32-byte hex string used as a unique jti claim.
+func generateTokenID() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// storeRefreshToken persists a hashed refresh token for server-side validation.
+func storeRefreshToken(userID uint, tokenString string, expiresAt time.Time) error {
+	record := models.RefreshToken{
+		UserID:    userID,
+		TokenHash: hashToken(tokenString),
+		ExpiresAt: expiresAt,
+	}
+	return database.DB.Create(&record).Error
+}
 
 // Signup (สมัครสมาชิก)
 func Signup(c *fiber.Ctx) error {
@@ -181,16 +209,28 @@ func Login(c *fiber.Ctx) error {
 	}
 
 	// 4. สร้าง Refresh Token (7 วัน)
+	refreshExpiry := time.Now().Add(time.Hour * 24 * 7)
+	jti, err := generateTokenID()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Refresh Token ไม่สำเร็จ"})
+	}
+
 	refreshToken := jwt.New(jwt.SigningMethodHS256)
 	refreshClaims := refreshToken.Claims.(jwt.MapClaims)
 	refreshClaims["user_id"] = user.ID
 	refreshClaims["role"] = user.Role
 	refreshClaims["type"] = "refresh"
-	refreshClaims["exp"] = time.Now().Add(time.Hour * 24 * 7).Unix()
+	refreshClaims["jti"] = jti
+	refreshClaims["exp"] = refreshExpiry.Unix()
 
 	refreshTokenString, err := refreshToken.SignedString([]byte(config.Env.JWTSecret))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Refresh Token ไม่สำเร็จ"})
+	}
+
+	// Store refresh token server-side
+	if err := storeRefreshToken(user.ID, refreshTokenString, refreshExpiry); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "บันทึก Refresh Token ไม่สำเร็จ"})
 	}
 
 	return c.JSON(fiber.Map{
@@ -252,6 +292,13 @@ func RefreshToken(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "Token ไม่มีข้อมูล role"})
 	}
 
+	// Validate refresh token exists server-side and revoke it
+	oldHash := hashToken(input.RefreshToken)
+	result := database.DB.Where("token_hash = ? AND user_id = ?", oldHash, uint(userID)).Delete(&models.RefreshToken{})
+	if result.RowsAffected == 0 {
+		return c.Status(401).JSON(fiber.Map{"error": "Refresh Token ถูกเพิกถอนแล้วหรือไม่ถูกต้อง"})
+	}
+
 	// สร้าง Access Token ใหม่ (1 ชั่วโมง)
 	newAccessToken := jwt.New(jwt.SigningMethodHS256)
 	newAccessClaims := newAccessToken.Claims.(jwt.MapClaims)
@@ -265,20 +312,45 @@ func RefreshToken(c *fiber.Ctx) error {
 	}
 
 	// สร้าง Refresh Token ใหม่ (7 วัน)
+	newRefreshExpiry := time.Now().Add(time.Hour * 24 * 7)
+	newJti, err := generateTokenID()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Refresh Token ไม่สำเร็จ"})
+	}
+
 	newRefreshToken := jwt.New(jwt.SigningMethodHS256)
 	newRefreshClaims := newRefreshToken.Claims.(jwt.MapClaims)
 	newRefreshClaims["user_id"] = userID
 	newRefreshClaims["role"] = role
 	newRefreshClaims["type"] = "refresh"
-	newRefreshClaims["exp"] = time.Now().Add(time.Hour * 24 * 7).Unix()
+	newRefreshClaims["jti"] = newJti
+	newRefreshClaims["exp"] = newRefreshExpiry.Unix()
 
 	newRefreshTokenString, err := newRefreshToken.SignedString([]byte(config.Env.JWTSecret))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "สร้าง Refresh Token ไม่สำเร็จ"})
 	}
 
+	// Store new refresh token server-side
+	if err := storeRefreshToken(uint(userID), newRefreshTokenString, newRefreshExpiry); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "บันทึก Refresh Token ไม่สำเร็จ"})
+	}
+
 	return c.JSON(fiber.Map{
 		"token":         newAccessTokenString,
 		"refresh_token": newRefreshTokenString,
 	})
+}
+
+// Logout - revoke all refresh tokens for the authenticated user
+func Logout(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	if err := database.DB.Where("user_id = ?", userID).Delete(&models.RefreshToken{}).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "ออกจากระบบไม่สำเร็จ"})
+	}
+
+	logAudit(c, userID, "logout", "User logged out")
+
+	return c.JSON(fiber.Map{"message": "ออกจากระบบสำเร็จ"})
 }
