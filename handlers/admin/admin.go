@@ -1,9 +1,11 @@
-package controllers
+package admin
 
 import (
 	"fearfree-backend/database"
+	"fearfree-backend/handlers/shared"
 	"fearfree-backend/models"
 	"fmt"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -31,7 +33,7 @@ func AdminCreateCategory(c *fiber.Ctx) error {
 	}
 
 	adminID := c.Locals("user_id").(uint)
-	logAudit(c, adminID, "create_category", fmt.Sprintf("Created category: %s (ID: %d)", cat.Name, cat.ID))
+	shared.LogAudit(c, adminID, "create_category", fmt.Sprintf("Created category: %s (ID: %d)", cat.Name, cat.ID))
 
 	return c.Status(201).JSON(fiber.Map{"success": true, "data": cat})
 }
@@ -103,7 +105,7 @@ func AdminDeleteCategory(c *fiber.Ctx) error {
 	}
 
 	adminID := c.Locals("user_id").(uint)
-	logAudit(c, adminID, "delete_category", fmt.Sprintf("Deleted category ID: %d (%s)", cat.ID, cat.Name))
+	shared.LogAudit(c, adminID, "delete_category", fmt.Sprintf("Deleted category ID: %d (%s)", cat.ID, cat.Name))
 
 	return c.JSON(fiber.Map{"success": true})
 }
@@ -141,7 +143,7 @@ func AdminCreateAnimal(c *fiber.Ctx) error {
 	}
 
 	adminID := c.Locals("user_id").(uint)
-	logAudit(c, adminID, "create_animal", fmt.Sprintf("Created animal: %s (ID: %d)", animal.Name, animal.ID))
+	shared.LogAudit(c, adminID, "create_animal", fmt.Sprintf("Created animal: %s (ID: %d)", animal.Name, animal.ID))
 
 	return c.Status(201).JSON(fiber.Map{"success": true, "data": animal})
 }
@@ -200,7 +202,7 @@ func AdminDeleteAnimal(c *fiber.Ctx) error {
 	}
 
 	adminID := c.Locals("user_id").(uint)
-	logAudit(c, adminID, "delete_animal", fmt.Sprintf("Deleted animal ID: %d (%s)", animal.ID, animal.Name))
+	shared.LogAudit(c, adminID, "delete_animal", fmt.Sprintf("Deleted animal ID: %d (%s)", animal.ID, animal.Name))
 
 	return c.JSON(fiber.Map{"success": true})
 }
@@ -256,7 +258,7 @@ func AdminCreateStage(c *fiber.Ctx) error {
 	}
 
 	adminID := c.Locals("user_id").(uint)
-	logAudit(c, adminID, "create_stage", fmt.Sprintf("Created stage %d for animal ID: %d (ID: %d)", stage.StageNo, stage.AnimalID, stage.ID))
+	shared.LogAudit(c, adminID, "create_stage", fmt.Sprintf("Created stage %d for animal ID: %d (ID: %d)", stage.StageNo, stage.AnimalID, stage.ID))
 
 	return c.Status(201).JSON(fiber.Map{"success": true, "data": stage})
 }
@@ -304,7 +306,154 @@ func AdminDeleteStage(c *fiber.Ctx) error {
 	}
 
 	adminID := c.Locals("user_id").(uint)
-	logAudit(c, adminID, "delete_stage", fmt.Sprintf("Deleted stage ID: %d (stage %d, animal ID: %d)", stage.ID, stage.StageNo, stage.AnimalID))
+	shared.LogAudit(c, adminID, "delete_stage", fmt.Sprintf("Deleted stage ID: %d (stage %d, animal ID: %d)", stage.ID, stage.StageNo, stage.AnimalID))
 
 	return c.JSON(fiber.Map{"success": true})
+}
+
+// === REWARDS ===
+
+type RewardInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CostCoins   int    `json:"cost_coins"`
+	Stock       int    `json:"stock"`
+	ImageUrl    string `json:"image_url"`
+}
+
+func validateRewardInput(input RewardInput) string {
+	if input.CostCoins <= 0 {
+		return "cost_coins ต้องมากกว่า 0"
+	}
+	if input.Stock < 0 {
+		return "stock ต้องมากกว่าหรือเท่ากับ 0"
+	}
+	return ""
+}
+
+// 1. GET /admin/rewards (ดึงทั้งหมด รวมถึงอันที่สต๊อกหมด)
+func AdminGetRewards(c *fiber.Ctx) error {
+	var rewards []models.Reward
+	if err := database.DB.Order("id asc").Find(&rewards).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "ไม่สามารถดึงข้อมูลของรางวัลได้"})
+	}
+	return c.JSON(fiber.Map{"data": rewards})
+}
+
+// 2. POST /admin/rewards (สร้างใหม่)
+func AdminCreateReward(c *fiber.Ctx) error {
+	var input RewardInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if msg := validateRewardInput(input); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
+	}
+
+	reward := models.Reward{
+		Name:        input.Name,
+		Description: input.Description,
+		CostCoins:   input.CostCoins,
+		Stock:       input.Stock,
+		ImageUrl:    input.ImageUrl,
+	}
+
+	if err := database.DB.Create(&reward).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "สร้างของรางวัลไม่สำเร็จ"})
+	}
+
+	adminID := c.Locals("user_id").(uint)
+	shared.LogAudit(c, adminID, "create_reward", fmt.Sprintf("Created reward: %s (ID: %d)", reward.Name, reward.ID))
+
+	return c.Status(201).JSON(fiber.Map{"success": true, "data": reward})
+}
+
+// 3. PUT /admin/rewards/:id (อัปเดต)
+func AdminUpdateReward(c *fiber.Ctx) error {
+	rewardID, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "id ไม่ถูกต้อง"})
+	}
+	var input RewardInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if msg := validateRewardInput(input); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
+	}
+
+	var reward models.Reward
+	if err := database.DB.First(&reward, rewardID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบของรางวัล"})
+	}
+
+	reward.Name = input.Name
+	reward.Description = input.Description
+	reward.CostCoins = input.CostCoins
+	reward.Stock = input.Stock
+	reward.ImageUrl = input.ImageUrl
+
+	if err := database.DB.Save(&reward).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "อัปเดตของรางวัลไม่สำเร็จ"})
+	}
+
+	adminID := c.Locals("user_id").(uint)
+	shared.LogAudit(c, adminID, "update_reward", fmt.Sprintf("Updated reward ID: %d (%s)", reward.ID, reward.Name))
+
+	return c.JSON(fiber.Map{"success": true, "data": reward})
+}
+
+// 4. DELETE /admin/rewards/:id (ลบ)
+func AdminDeleteReward(c *fiber.Ctx) error {
+	rewardID, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "id ไม่ถูกต้อง"})
+	}
+
+	var reward models.Reward
+	if err := database.DB.First(&reward, rewardID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบของรางวัล"})
+	}
+
+	// Redemption history is preserved as historical data; only delete the reward
+	if err := database.DB.Delete(&reward).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "ลบของรางวัลไม่สำเร็จ"})
+	}
+
+	adminID := c.Locals("user_id").(uint)
+	shared.LogAudit(c, adminID, "delete_reward", fmt.Sprintf("Deleted reward ID: %d (%s)", reward.ID, reward.Name))
+
+	return c.JSON(fiber.Map{"success": true})
+}
+
+// === AUDIT LOGS ===
+
+// AdminGetAuditLogs returns paginated audit logs for admin review.
+func AdminGetAuditLogs(c *fiber.Ctx) error {
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	database.DB.Model(&models.AuditLog{}).Count(&total)
+
+	var logs []models.AuditLog
+	if err := database.DB.Order("created_at desc").Offset(offset).Limit(limit).Find(&logs).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูล audit log ไม่สำเร็จ"})
+	}
+
+	return c.JSON(fiber.Map{
+		"data":  logs,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
 }

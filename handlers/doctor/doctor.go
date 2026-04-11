@@ -1,8 +1,9 @@
-package controllers
+package doctor
 
 import (
 	"crypto/rand"
 	"fearfree-backend/database"
+	"fearfree-backend/handlers/shared"
 	"fearfree-backend/models"
 	"fmt"
 	"math/big"
@@ -156,7 +157,7 @@ func CreatePatientDoctor(c *fiber.Ctx) error {
 			return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
 		}
 
-		logAudit(c, doctorUserID, "create_patient", fmt.Sprintf("Created patient: %s (code: %s)", input.FullName, codePatient))
+		shared.LogAudit(c, doctorUserID, "create_patient", fmt.Sprintf("Created patient: %s (code: %s)", input.FullName, codePatient))
 
 		return c.Status(201).JSON(fiber.Map{
 			"success": true,
@@ -239,7 +240,7 @@ func DeletePatient(c *fiber.Ctx) error {
 	}
 
 	doctorUserID := c.Locals("user_id").(uint)
-	logAudit(c, doctorUserID, "delete_patient", fmt.Sprintf("Deleted patient ID: %d", patient.ID))
+	shared.LogAudit(c, doctorUserID, "delete_patient", fmt.Sprintf("Deleted patient ID: %d", patient.ID))
 
 	return c.JSON(fiber.Map{"success": true})
 }

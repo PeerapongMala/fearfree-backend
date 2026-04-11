@@ -1,4 +1,4 @@
-package controllers
+package auth
 
 import (
 	"crypto/rand"
@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fearfree-backend/config"
 	"fearfree-backend/database"
+	"fearfree-backend/handlers/shared"
 	"fearfree-backend/models"
 	"fmt"
 	"math"
@@ -77,7 +78,7 @@ func Signup(c *fiber.Ctx) error {
 	if len(input.Password) > 72 {
 		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีความยาวไม่เกิน 72 ตัวอักษร"})
 	}
-	if !validatePasswordComplexity(input.Password) {
+	if !shared.ValidatePasswordComplexity(input.Password) {
 		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีตัวเลข ตัวอักษรใหญ่ และอักขระพิเศษอย่างน้อยอย่างละ 1 ตัว"})
 	}
 
@@ -138,7 +139,7 @@ func Signup(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "บันทึกข้อมูลไม่สำเร็จ"})
 	}
 
-	logAudit(c, user.ID, "signup", "User signed up: "+input.Username)
+	shared.LogAudit(c, user.ID, "signup", "User signed up: "+input.Username)
 
 	return c.Status(201).JSON(fiber.Map{
 		"message": "สมัครสมาชิกสำเร็จ!",
@@ -194,7 +195,7 @@ func Login(c *fiber.Ctx) error {
 	attempt.LockedUntil = nil
 	database.DB.Save(&attempt)
 
-	logAudit(c, user.ID, "login", "User logged in: "+user.Username)
+	shared.LogAudit(c, user.ID, "login", "User logged in: "+user.Username)
 
 	// 3. สร้าง Access Token (1 ชั่วโมง)
 	accessToken := jwt.New(jwt.SigningMethodHS256)
@@ -350,7 +351,7 @@ func Logout(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "ออกจากระบบไม่สำเร็จ"})
 	}
 
-	logAudit(c, userID, "logout", "User logged out")
+	shared.LogAudit(c, userID, "logout", "User logged out")
 
 	return c.JSON(fiber.Map{"message": "ออกจากระบบสำเร็จ"})
 }

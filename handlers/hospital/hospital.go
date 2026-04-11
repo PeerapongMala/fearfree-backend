@@ -1,4 +1,4 @@
-package controllers
+package hospital
 
 import (
 	"fearfree-backend/database"
@@ -31,8 +31,8 @@ func SelectHospital(c *fiber.Ctx) error {
 	}
 
 	// เช็คว่าโรงพยาบาลนี้มีอยู่จริงไหม?
-	var hospital models.Hospital
-	if err := database.DB.First(&hospital, input.HospitalID).Error; err != nil {
+	var hosp models.Hospital
+	if err := database.DB.First(&hosp, input.HospitalID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบโรงพยาบาลที่เลือก"})
 	}
 
@@ -59,7 +59,7 @@ func SelectHospital(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"message": "เลือกโรงพยาบาลสำเร็จ",
-		"data":    hospital,
+		"data":    hosp,
 	})
 }
 

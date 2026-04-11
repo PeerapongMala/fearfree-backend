@@ -1,7 +1,8 @@
-package controllers
+package reward
 
 import (
 	"fearfree-backend/database"
+	"fearfree-backend/handlers/shared"
 	"fearfree-backend/models"
 	"fmt"
 	"strconv"
@@ -55,30 +56,30 @@ func RedeemReward(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบข้อมูลผู้ป่วย"})
 	}
 
-	var reward models.Reward
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&reward, rewardID).Error; err != nil {
+	var rwd models.Reward
+	if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&rwd, rewardID).Error; err != nil {
 		tx.Rollback()
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบของรางวัล"})
 	}
 
-	if reward.Stock <= 0 {
+	if rwd.Stock <= 0 {
 		tx.Rollback()
 		return c.Status(400).JSON(fiber.Map{"error": "ของรางวัลหมดแล้ว"})
 	}
 
-	if patient.Balance < int64(reward.CostCoins) {
+	if patient.Balance < int64(rwd.CostCoins) {
 		tx.Rollback()
 		return c.Status(400).JSON(fiber.Map{"error": "เหรียญไม่พอ"})
 	}
 
 	// อัปเดตเหรียญ Patient ด้วย atomic expression
-	if err := tx.Model(&patient).Update("balance", gorm.Expr("balance - ?", reward.CostCoins)).Error; err != nil {
+	if err := tx.Model(&patient).Update("balance", gorm.Expr("balance - ?", rwd.CostCoins)).Error; err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "ตัดเหรียญไม่สำเร็จ"})
 	}
 
 	// ตัดสต็อก Reward ด้วย atomic expression
-	if err := tx.Model(&reward).Update("stock", gorm.Expr("stock - ?", 1)).Error; err != nil {
+	if err := tx.Model(&rwd).Update("stock", gorm.Expr("stock - ?", 1)).Error; err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "ตัดสต็อกไม่สำเร็จ"})
 	}
@@ -100,28 +101,11 @@ func RedeemReward(c *fiber.Ctx) error {
 	// Re-read patient after commit for accurate response
 	database.DB.Where("user_id = ?", userID).First(&patient)
 
-	logAudit(c, userID, "redeem_reward", fmt.Sprintf("Redeemed reward ID: %d (%s), cost: %d coins", reward.ID, reward.Name, reward.CostCoins))
+	shared.LogAudit(c, userID, "redeem_reward", fmt.Sprintf("Redeemed reward ID: %d (%s), cost: %d coins", rwd.ID, rwd.Name, rwd.CostCoins))
 
 	return c.JSON(fiber.Map{
 		"success":         true,
 		"message":         "แลกรางวัลสำเร็จ!",
 		"remaining_coins": patient.Balance,
 	})
-}
-
-// 3. ดูประวัติการแลกของฉัน
-func GetMyRedemptions(c *fiber.Ctx) error {
-	userID := c.Locals("user_id").(uint)
-
-	var patient models.Patient
-	if err := database.DB.Where("user_id = ?", userID).First(&patient).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบข้อมูลผู้ป่วย"})
-	}
-
-	histories := []models.RedemptionHistory{}
-	if err := database.DB.Preload("Reward").Where("patient_id = ?", patient.ID).Order("redeemed_at desc").Find(&histories).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลประวัติไม่สำเร็จ"})
-	}
-
-	return c.JSON(fiber.Map{"data": histories})
 }

@@ -1,7 +1,14 @@
 package routes
 
 import (
-	"fearfree-backend/controllers"
+	"fearfree-backend/handlers/admin"
+	"fearfree-backend/handlers/assessment"
+	"fearfree-backend/handlers/auth"
+	"fearfree-backend/handlers/doctor"
+	"fearfree-backend/handlers/game"
+	"fearfree-backend/handlers/hospital"
+	"fearfree-backend/handlers/reward"
+	"fearfree-backend/handlers/user"
 	"fearfree-backend/middleware"
 	"time"
 
@@ -12,71 +19,71 @@ import (
 func Setup(app *fiber.App) {
 	api := app.Group("/api/v1")
 
-	auth := api.Group("/auth", limiter.New(limiter.Config{
+	authGroup := api.Group("/auth", limiter.New(limiter.Config{
 		Max:        10,
 		Expiration: 1 * time.Minute,
 	}))
-	auth.Post("/signup", controllers.Signup)
-	auth.Post("/login", controllers.Login)
-	auth.Post("/refresh", controllers.RefreshToken)
-	auth.Post("/logout", middleware.Protect, controllers.Logout)
+	authGroup.Post("/signup", auth.Signup)
+	authGroup.Post("/login", auth.Login)
+	authGroup.Post("/refresh", auth.RefreshToken)
+	authGroup.Post("/logout", middleware.Protect, auth.Logout)
 
 	// Users endpoints (Moved from Auth)
 	users := api.Group("/users", middleware.Protect)
-	users.Get("/me", controllers.GetProfile)
-	users.Patch("/me", controllers.UpdateProfile)
-	users.Get("/me/redemptions", controllers.GetMyRedemptions) // Moved from rewards
-	users.Get("/play-history", controllers.GetMyPlayHistory)
+	users.Get("/me", user.GetProfile)
+	users.Patch("/me", user.UpdateProfile)
+	users.Get("/me/redemptions", user.GetMyRedemptions) // Moved from rewards
+	users.Get("/play-history", user.GetMyPlayHistory)
 
 	stages := api.Group("/stages", middleware.Protect)
-	stages.Get("/categories", controllers.ListAnimalCategories)                      // ดึงหมวดหมู่
-	stages.Get("/categories/:categoryId/animals", controllers.ListAnimalsByCategory) // ดึงสัตว์
-	stages.Get("/animals/:animalId/levels", controllers.ListStagesByAnimal)          // ดึงด่าน (ใช้คำว่า levels แทน stages)
-	stages.Post("/levels/:levelId/results", controllers.SubmitStageResult)           // บันทึกผลการเล่น
+	stages.Get("/categories", game.ListAnimalCategories)                      // ดึงหมวดหมู่
+	stages.Get("/categories/:categoryId/animals", game.ListAnimalsByCategory) // ดึงสัตว์
+	stages.Get("/animals/:animalId/levels", game.ListStagesByAnimal)          // ดึงด่าน (ใช้คำว่า levels แทน stages)
+	stages.Post("/levels/:levelId/results", game.SubmitStageResult)           // บันทึกผลการเล่น
 
 	rewards := api.Group("/rewards", middleware.Protect)
-	rewards.Get("/", controllers.ListRewards)                   // ดูของรางวัล
-	rewards.Post("/:rewardId/redeem", controllers.RedeemReward) // แลกรางวัล
+	rewards.Get("/", reward.ListRewards)                   // ดูของรางวัล
+	rewards.Post("/:rewardId/redeem", reward.RedeemReward) // แลกรางวัล
 
 	assessments := api.Group("/assessments", middleware.Protect)
-	assessments.Get("/questions", controllers.GetAssessments)
-	assessments.Post("/results", controllers.SubmitAssessment)
+	assessments.Get("/questions", assessment.GetAssessments)
+	assessments.Post("/results", assessment.SubmitAssessment)
 
 	hospitals := api.Group("/hospitals", middleware.Protect)
-	hospitals.Get("/", controllers.ListHospitals)         // ดูรายชื่อทั้งหมด
-	hospitals.Post("/select", controllers.SelectHospital) // เลือกสังกัด
-	hospitals.Get("/me", controllers.GetMyHospital)       // ดูสังกัดของฉัน
+	hospitals.Get("/", hospital.ListHospitals)         // ดูรายชื่อทั้งหมด
+	hospitals.Post("/select", hospital.SelectHospital) // เลือกสังกัด
+	hospitals.Get("/me", hospital.GetMyHospital)       // ดูสังกัดของฉัน
 
-	doctor := api.Group("/doctor", middleware.Protect, middleware.IsDoctor)
-	doctor.Get("/patients", controllers.GetPatients)
-	doctor.Post("/patients", controllers.CreatePatientDoctor)
-	doctor.Delete("/patients/:id", controllers.DeletePatient)
-	doctor.Get("/patients/:id/history", controllers.GetPatientPlayHistoryAggregated)
-	doctor.Get("/patients/:id/test-history", controllers.GetPatientTestHistoryNotes)
-	doctor.Get("/patients/:id/redemptions", controllers.GetPatientRedemptionsDoc)
+	doctorGroup := api.Group("/doctor", middleware.Protect, middleware.IsDoctor)
+	doctorGroup.Get("/patients", doctor.GetPatients)
+	doctorGroup.Post("/patients", doctor.CreatePatientDoctor)
+	doctorGroup.Delete("/patients/:id", doctor.DeletePatient)
+	doctorGroup.Get("/patients/:id/history", doctor.GetPatientPlayHistoryAggregated)
+	doctorGroup.Get("/patients/:id/test-history", doctor.GetPatientTestHistoryNotes)
+	doctorGroup.Get("/patients/:id/redemptions", doctor.GetPatientRedemptionsDoc)
 
-	admin := api.Group("/admin", middleware.Protect, middleware.IsAdmin)
+	adminGroup := api.Group("/admin", middleware.Protect, middleware.IsAdmin)
 	// Rewards
-	admin.Get("/rewards", controllers.AdminGetRewards)
-	admin.Post("/rewards", controllers.AdminCreateReward)
-	admin.Put("/rewards/:id", controllers.AdminUpdateReward)
-	admin.Delete("/rewards/:id", controllers.AdminDeleteReward)
+	adminGroup.Get("/rewards", admin.AdminGetRewards)
+	adminGroup.Post("/rewards", admin.AdminCreateReward)
+	adminGroup.Put("/rewards/:id", admin.AdminUpdateReward)
+	adminGroup.Delete("/rewards/:id", admin.AdminDeleteReward)
 
 	// Categories
-	admin.Post("/categories", controllers.AdminCreateCategory)
-	admin.Put("/categories/:id", controllers.AdminUpdateCategory)
-	admin.Delete("/categories/:id", controllers.AdminDeleteCategory)
+	adminGroup.Post("/categories", admin.AdminCreateCategory)
+	adminGroup.Put("/categories/:id", admin.AdminUpdateCategory)
+	adminGroup.Delete("/categories/:id", admin.AdminDeleteCategory)
 
 	// Animals
-	admin.Post("/animals", controllers.AdminCreateAnimal)
-	admin.Put("/animals/:id", controllers.AdminUpdateAnimal)
-	admin.Delete("/animals/:id", controllers.AdminDeleteAnimal)
+	adminGroup.Post("/animals", admin.AdminCreateAnimal)
+	adminGroup.Put("/animals/:id", admin.AdminUpdateAnimal)
+	adminGroup.Delete("/animals/:id", admin.AdminDeleteAnimal)
 
 	// Stages
-	admin.Post("/stages", controllers.AdminCreateStage)
-	admin.Put("/stages/:id", controllers.AdminUpdateStage)
-	admin.Delete("/stages/:id", controllers.AdminDeleteStage)
+	adminGroup.Post("/stages", admin.AdminCreateStage)
+	adminGroup.Put("/stages/:id", admin.AdminUpdateStage)
+	adminGroup.Delete("/stages/:id", admin.AdminDeleteStage)
 
 	// Audit Logs
-	admin.Get("/audit-logs", controllers.AdminGetAuditLogs)
+	adminGroup.Get("/audit-logs", admin.AdminGetAuditLogs)
 }

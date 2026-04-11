@@ -1,4 +1,4 @@
-package controllers
+package assessment
 
 import (
 	"fearfree-backend/database"
@@ -94,8 +94,8 @@ func SubmitAssessment(c *fiber.Ctx) error {
 	database.DB.Model(&patient).Update("fear_level", fearLevel)
 
 	return c.JSON(fiber.Map{
-		"success":     true,
-		"message":     "ประเมินผลสำเร็จ",
+		"success": true,
+		"message": "ประเมินผลสำเร็จ",
 		"data": fiber.Map{
 			"fear_level":  fearLevel,
 			"percent":     percent,

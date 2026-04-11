@@ -1,4 +1,4 @@
-package controllers
+package user
 
 import (
 	"fearfree-backend/database"
@@ -111,4 +111,21 @@ func GetMyPlayHistory(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"data": result,
 	})
+}
+
+// GET /users/me/redemptions - ดูประวัติการแลกของฉัน
+func GetMyRedemptions(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+
+	var patient models.Patient
+	if err := database.DB.Where("user_id = ?", userID).First(&patient).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบข้อมูลผู้ป่วย"})
+	}
+
+	histories := []models.RedemptionHistory{}
+	if err := database.DB.Preload("Reward").Where("patient_id = ?", patient.ID).Order("redeemed_at desc").Find(&histories).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลประวัติไม่สำเร็จ"})
+	}
+
+	return c.JSON(fiber.Map{"data": histories})
 }
