@@ -30,7 +30,7 @@ type Patient struct {
 	Age               int       `json:"age"`
 	MostFearAnimal    string    `json:"most_fear_animal"`
 	FearLevel         string    `json:"fear_level" gorm:"type:fear_level"`
-	Balance           int64     `json:"balance" gorm:"default:0"`
+	Balance           int64     `json:"balance" gorm:"default:0;check:balance >= 0"`
 	CodePatient       *string   `json:"code_patient" gorm:"unique"`
 	CreatedAt         time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt         time.Time `json:"updated_at" gorm:"default:CURRENT_TIMESTAMP"`

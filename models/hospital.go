@@ -10,7 +10,7 @@ type Hospital struct {
 type UserHospital struct {
 	ID         uint `json:"id" gorm:"primaryKey"`
 	UserID     uint `json:"user_id" gorm:"uniqueIndex"`
-	HospitalID uint `json:"hospital_id"`
+	HospitalID uint `json:"hospital_id" gorm:"index"`
 
 	Hospital *Hospital `json:"hospital" gorm:"foreignKey:HospitalID"`
 }

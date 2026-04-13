@@ -6,8 +6,8 @@ type Reward struct {
 	ID          uint   `json:"id" gorm:"primaryKey"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	CostCoins   int    `json:"cost_coins"`
-	Stock       int    `json:"stock"`
+	CostCoins   int    `json:"cost_coins" gorm:"not null;check:cost_coins > 0"`
+	Stock       int    `json:"stock" gorm:"not null;check:stock >= 0"`
 	ImageUrl    string `json:"image_url"`
 }
 

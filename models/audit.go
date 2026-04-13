@@ -8,5 +8,7 @@ type AuditLog struct {
 	Action    string    `json:"action" gorm:"not null"`
 	Detail    string    `json:"detail"`
 	IPAddress string    `json:"ip_address"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime;index:idx_audit_created_at,sort:desc"`
 }
+
+func (AuditLog) TableName() string { return "audit_logs" }

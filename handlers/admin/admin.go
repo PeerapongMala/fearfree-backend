@@ -374,7 +374,7 @@ func validateRewardInput(input RewardInput) string {
 // 1. GET /admin/rewards (ดึงทั้งหมด รวมถึงอันที่สต๊อกหมด)
 func AdminGetRewards(c *fiber.Ctx) error {
 	var rewards []models.Reward
-	if err := database.DB.Order("id asc").Find(&rewards).Error; err != nil {
+	if err := database.DB.Order("id asc").Limit(500).Find(&rewards).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ไม่สามารถดึงข้อมูลของรางวัลได้"})
 	}
 	return c.JSON(fiber.Map{"data": rewards})

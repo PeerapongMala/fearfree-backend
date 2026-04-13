@@ -74,7 +74,7 @@ func ListStagesByAnimal(c *fiber.Ctx) error {
 	animalId := c.Params("animalId")
 	stages := []models.Stage{}
 
-	if err := database.DB.Where("animal_id = ?", animalId).Order("stage_no asc").Find(&stages).Error; err != nil {
+	if err := database.DB.Where("animal_id = ?", animalId).Order("stage_no asc").Limit(50).Find(&stages).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ดึงข้อมูลด่านไม่สำเร็จ"})
 	}
 	return c.JSON(fiber.Map{"data": stages})
