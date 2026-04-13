@@ -42,6 +42,9 @@ func LoadConfig() {
 	if Env.JWTSecret == "" || Env.JWTSecret == "supersecretkey" {
 		log.Fatal("FATAL: JWT_SECRET environment variable must be set to a secure value (not empty or 'supersecretkey')")
 	}
+	if len(Env.JWTSecret) < 32 {
+		log.Fatal("FATAL: JWT_SECRET must be at least 32 characters long")
+	}
 }
 
 // getEnvOrDefault gets an environment variable or returns a default value

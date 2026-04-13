@@ -16,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // Struct สำหรับรับค่าจากหน้าบ้าน (สมัครสมาชิก)
@@ -168,25 +169,27 @@ func Login(c *fiber.Ctx) error {
 	// 1. หา User จาก Username
 	var user models.User
 	if err := database.DB.Where("username = ?", input.Username).First(&user).Error; err != nil {
-		// เพิ่มจำนวนครั้งที่ login ผิด
-		attempt.Attempts++
+		// HIGH-2: Atomic increment to avoid read-modify-write race
+		database.DB.Model(&models.LoginAttempt{}).Where("username = ?", input.Username).UpdateColumn("attempts", gorm.Expr("attempts + 1"))
+		// Re-read to check lockout threshold
+		database.DB.Where("username = ?", input.Username).First(&attempt)
 		if attempt.Attempts >= 5 {
 			lockUntil := time.Now().Add(15 * time.Minute)
-			attempt.LockedUntil = &lockUntil
+			database.DB.Model(&attempt).Update("locked_until", &lockUntil)
 		}
-		database.DB.Save(&attempt)
 		return c.Status(401).JSON(fiber.Map{"error": "ชื่อผู้ใช้หรือรหัสผ่านผิด"})
 	}
 
 	// 2. เช็ครหัสผ่านด้วย Bcrypt
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
-		// เพิ่มจำนวนครั้งที่ login ผิด
-		attempt.Attempts++
+		// HIGH-2: Atomic increment to avoid read-modify-write race
+		database.DB.Model(&models.LoginAttempt{}).Where("username = ?", input.Username).UpdateColumn("attempts", gorm.Expr("attempts + 1"))
+		// Re-read to check lockout threshold
+		database.DB.Where("username = ?", input.Username).First(&attempt)
 		if attempt.Attempts >= 5 {
 			lockUntil := time.Now().Add(15 * time.Minute)
-			attempt.LockedUntil = &lockUntil
+			database.DB.Model(&attempt).Update("locked_until", &lockUntil)
 		}
-		database.DB.Save(&attempt)
 		return c.Status(401).JSON(fiber.Map{"error": "ชื่อผู้ใช้หรือรหัสผ่านผิด"})
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"time"
 
 	"fearfree-backend/config"
 	"fearfree-backend/database"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
 func main() {
@@ -64,6 +66,9 @@ func main() {
 		database.DB.Create(&questions)
 	}
 
+	// MEDIUM: Cleanup expired refresh tokens on startup
+	database.DB.Where("expires_at < ?", time.Now()).Delete(&models.RefreshToken{})
+
 	app := fiber.New(fiber.Config{
 		ErrorHandler: middleware.ErrorHandler,
 	})
@@ -78,14 +83,21 @@ func main() {
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 	}))
 
-	// Security Headers
+	// Security Headers (HIGH-5: added HSTS)
 	app.Use(func(c *fiber.Ctx) error {
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("X-XSS-Protection", "1; mode=block")
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		return c.Next()
 	})
+
+	// HIGH-1: Global rate limiter (100 req/min per IP)
+	app.Use(limiter.New(limiter.Config{
+		Max:        100,
+		Expiration: 1 * time.Minute,
+	}))
 
 	// เรียกใช้ Routes
 	routes.Setup(app)

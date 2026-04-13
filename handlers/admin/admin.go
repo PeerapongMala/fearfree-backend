@@ -17,10 +17,30 @@ type CategoryInput struct {
 	Description string `json:"description"`
 }
 
+// validateFieldLengths checks common admin input field lengths and returns an error message if any exceed limits.
+func validateFieldLengths(name, description string, urls ...string) string {
+	if len(name) > 255 {
+		return "name ต้องมีความยาวไม่เกิน 255 ตัวอักษร"
+	}
+	if len(description) > 2048 {
+		return "description ต้องมีความยาวไม่เกิน 2048 ตัวอักษร"
+	}
+	for _, u := range urls {
+		if len(u) > 2048 {
+			return "URL ต้องมีความยาวไม่เกิน 2048 ตัวอักษร"
+		}
+	}
+	return ""
+}
+
 func AdminCreateCategory(c *fiber.Ctx) error {
 	var input CategoryInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if msg := validateFieldLengths(input.Name, input.Description); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
 	}
 
 	cat := models.AnimalCategory{
@@ -46,6 +66,10 @@ func AdminUpdateCategory(c *fiber.Ctx) error {
 	var input CategoryInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if msg := validateFieldLengths(input.Name, input.Description); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
 	}
 
 	var cat models.AnimalCategory
@@ -125,6 +149,10 @@ func AdminCreateAnimal(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
+	if msg := validateFieldLengths(input.Name, input.Description, input.ThumbnailUrl); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
+	}
+
 	// Validate category_id exists
 	var cat models.AnimalCategory
 	if err := database.DB.First(&cat, input.CategoryID).Error; err != nil {
@@ -156,6 +184,10 @@ func AdminUpdateAnimal(c *fiber.Ctx) error {
 	var input AnimalInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if msg := validateFieldLengths(input.Name, input.Description, input.ThumbnailUrl); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
 	}
 
 	var animal models.Animal
@@ -224,6 +256,10 @@ func AdminCreateStage(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
+	if msg := validateFieldLengths("", "", input.MediaUrl); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
+	}
+
 	// Validate stage fields
 	if input.StageNo <= 0 {
 		return c.Status(400).JSON(fiber.Map{"error": "stage_no ต้องมากกว่า 0"})
@@ -271,6 +307,10 @@ func AdminUpdateStage(c *fiber.Ctx) error {
 	var input StageInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if msg := validateFieldLengths("", "", input.MediaUrl); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
 	}
 
 	var stage models.Stage
@@ -347,6 +387,10 @@ func AdminCreateReward(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
+	if msg := validateFieldLengths(input.Name, input.Description, input.ImageUrl); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
+	}
+
 	if msg := validateRewardInput(input); msg != "" {
 		return c.Status(400).JSON(fiber.Map{"error": msg})
 	}
@@ -378,6 +422,10 @@ func AdminUpdateReward(c *fiber.Ctx) error {
 	var input RewardInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+	}
+
+	if msg := validateFieldLengths(input.Name, input.Description, input.ImageUrl); msg != "" {
+		return c.Status(400).JSON(fiber.Map{"error": msg})
 	}
 
 	if msg := validateRewardInput(input); msg != "" {

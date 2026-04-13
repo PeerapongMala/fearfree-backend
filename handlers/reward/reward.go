@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // 1. ดึงรายการของรางวัลทั้งหมด
@@ -51,13 +52,13 @@ func RedeemReward(c *fiber.Ctx) error {
 
 	// ดึง Patient ID ภายใน transaction พร้อม FOR UPDATE lock
 	var patient models.Patient
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", userID).First(&patient).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", userID).First(&patient).Error; err != nil {
 		tx.Rollback()
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบข้อมูลผู้ป่วย"})
 	}
 
 	var rwd models.Reward
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&rwd, rewardID).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&rwd, rewardID).Error; err != nil {
 		tx.Rollback()
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบของรางวัล"})
 	}
@@ -72,8 +73,13 @@ func RedeemReward(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "เหรียญไม่พอ"})
 	}
 
-	// อัปเดตเหรียญ Patient ด้วย atomic expression
-	if err := tx.Model(&patient).Update("balance", gorm.Expr("balance - ?", rwd.CostCoins)).Error; err != nil {
+	// อัปเดตเหรียญ Patient ด้วย atomic expression + WHERE guard
+	result := tx.Model(&patient).Where("balance >= ?", rwd.CostCoins).Update("balance", gorm.Expr("balance - ?", rwd.CostCoins))
+	if result.RowsAffected == 0 {
+		tx.Rollback()
+		return c.Status(400).JSON(fiber.Map{"error": "เหรียญไม่พอ"})
+	}
+	if err := result.Error; err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "ตัดเหรียญไม่สำเร็จ"})
 	}

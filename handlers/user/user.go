@@ -7,6 +7,45 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// ProfileResponse is an explicit DTO that exposes only safe fields.
+type ProfileResponse struct {
+	ID              uint   `json:"id"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	Role            string `json:"role"`
+	FullName        string `json:"full_name"`
+	Age             int    `json:"age"`
+	MostFearAnimal  string `json:"most_fear_animal"`
+	FearLevel       string `json:"fear_level"`
+	Balance         int64  `json:"coins"`
+	FearPercentage  float64 `json:"fear_percentage"`
+	FearLevelText   string `json:"fear_level_text"`
+}
+
+// fearLevelToPercentage maps fear level enum to a representative percentage.
+func fearLevelToPercentage(level string) float64 {
+	switch level {
+	case "high":
+		return 85.0
+	case "medium":
+		return 50.0
+	default:
+		return 15.0
+	}
+}
+
+// fearLevelToText maps fear level enum to a human-readable Thai description.
+func fearLevelToText(level string) string {
+	switch level {
+	case "high":
+		return "สูง"
+	case "medium":
+		return "ปานกลาง"
+	default:
+		return "ต่ำ"
+	}
+}
+
 // GET /auth/v1/me
 func GetProfile(c *fiber.Ctx) error {
 	// 1. ดึง UserID ที่ Middleware แปะไว้ให้
@@ -18,10 +57,27 @@ func GetProfile(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ใช้งาน"})
 	}
 
-	// 3. ส่งข้อมูลกลับ
+	// 3. Build safe response DTO — never expose internal IDs or raw model
+	resp := ProfileResponse{
+		ID:       user.ID,
+		Username: user.Username,
+		Email:    user.Email,
+		Role:     string(user.Role),
+	}
+
+	if user.Patient != nil {
+		resp.FullName = user.Patient.FullName
+		resp.Age = user.Patient.Age
+		resp.MostFearAnimal = user.Patient.MostFearAnimal
+		resp.FearLevel = user.Patient.FearLevel
+		resp.Balance = user.Patient.Balance
+		resp.FearPercentage = fearLevelToPercentage(user.Patient.FearLevel)
+		resp.FearLevelText = fearLevelToText(user.Patient.FearLevel)
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
-		"data":    user,
+		"data":    resp,
 	})
 }
 

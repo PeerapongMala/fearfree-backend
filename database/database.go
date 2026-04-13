@@ -21,7 +21,7 @@ func ConnectDB() {
 	} else {
 		// Local development: build DSN from individual env vars
 		dsn = fmt.Sprintf(
-			"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Bangkok",
+			"host=%s user=%s password=%s dbname=%s port=%s sslmode=require TimeZone=Asia/Bangkok",
 			config.Env.DBHost,
 			config.Env.DBUser,
 			config.Env.DBPassword,
