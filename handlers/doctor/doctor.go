@@ -258,37 +258,33 @@ func GetPatientPlayHistoryAggregated(c *fiber.Ctx) error {
 		return err
 	}
 
-	// 1. Fetch all animals and their total stages
-	var animals []models.Animal
-	if err := database.DB.Preload("Stages").Find(&animals).Error; err != nil {
+	type AnimalProgress struct {
+		AnimalName      string  `json:"animal_name"`
+		ProgressPercent float64 `json:"progress_percent"`
+	}
+
+	// Single query: count completed stages per animal for this patient
+	var results []AnimalProgress
+	if err := database.DB.Raw(`
+		SELECT a.name AS animal_name,
+		       CASE WHEN COUNT(s.id) = 0 THEN 0
+		            ELSE ROUND(COUNT(pp.id) FILTER (WHERE pp.status = 'completed') * 100.0 / COUNT(s.id))
+		       END AS progress_percent
+		FROM animals a
+		JOIN stages s ON s.animal_id = a.id
+		LEFT JOIN patient_progress pp ON pp.stage_id = s.id AND pp.patient_id = ?
+		GROUP BY a.id, a.name
+		HAVING COUNT(pp.id) > 0
+		ORDER BY a.name
+	`, patient.ID).Scan(&results).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "ไม่สามารถดึงข้อมูลสัตว์ได้"})
 	}
 
-	// 2. Fetch completed stages for this patient
-	var progress []models.PatientProgress
-	database.DB.Where("patient_id = ? AND status = ?", patient.ID, models.StatusCompleted).Preload("Stage").Find(&progress)
-
-	// Map completed stages by animal
-	completedByAnimal := make(map[uint]int)
-	for _, p := range progress {
-		if p.Stage.ID != 0 {
-			completedByAnimal[p.Stage.AnimalID]++
-		}
-	}
-
-	// Calculate %
 	historyList := []fiber.Map{}
-	for _, a := range animals {
-		total := len(a.Stages)
-		completed := completedByAnimal[a.ID]
-		percent := 0
-		if total > 0 {
-			percent = (completed * 100) / total
-		}
-
+	for _, r := range results {
 		historyList = append(historyList, fiber.Map{
-			"animal_name":      a.Name,
-			"progress_percent": percent,
+			"animal_name":      r.AnimalName,
+			"progress_percent": r.ProgressPercent,
 		})
 	}
 
