@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"fearfree-backend/config"
 
@@ -38,6 +39,15 @@ func ConnectDB() {
 	if err != nil {
 		log.Fatal("Failed to connect to database: \n", err)
 	}
+
+	sqlDB, err := DB.DB()
+	if err != nil {
+		log.Fatal("Failed to get underlying sql.DB: ", err)
+	}
+	sqlDB.SetMaxOpenConns(20)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(2 * time.Minute)
 
 	log.Println("Database Connected Successfully!")
 }
