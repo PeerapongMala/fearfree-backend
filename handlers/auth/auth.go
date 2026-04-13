@@ -73,6 +73,12 @@ func Signup(c *fiber.Ctx) error {
 	if len(input.Username) < 6 {
 		return c.Status(400).JSON(fiber.Map{"error": "ชื่อผู้ใช้ต้องมีความยาวอย่างน้อย 6 ตัวอักษร"})
 	}
+	if len(input.Username) > 50 {
+		return c.Status(400).JSON(fiber.Map{"error": "ชื่อผู้ใช้ต้องมีความยาวไม่เกิน 50 ตัวอักษร"})
+	}
+	if len(input.Email) > 254 {
+		return c.Status(400).JSON(fiber.Map{"error": "อีเมลต้องมีความยาวไม่เกิน 254 ตัวอักษร"})
+	}
 	if len(input.Password) < 8 {
 		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร"})
 	}

@@ -81,6 +81,7 @@ func main() {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigin,
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 	}))
 
 	// Security Headers (HIGH-5: added HSTS)

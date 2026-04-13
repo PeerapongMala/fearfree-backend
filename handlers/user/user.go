@@ -124,7 +124,13 @@ func UpdateProfile(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "อัปเดตข้อมูลสำเร็จ",
-		"data":    patient,
+		"data": fiber.Map{
+			"full_name":        patient.FullName,
+			"age":              patient.Age,
+			"most_fear_animal": patient.MostFearAnimal,
+			"fear_level":       patient.FearLevel,
+			"coins":            patient.Balance,
+		},
 	})
 }
 

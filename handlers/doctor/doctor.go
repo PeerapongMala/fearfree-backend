@@ -96,6 +96,12 @@ func CreatePatientDoctor(c *fiber.Ctx) error {
 	if strings.TrimSpace(input.MostFearAnimal) == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "กรุณาระบุสัตว์ที่กลัวที่สุด (most_fear_animal)"})
 	}
+	if len(input.FullName) > 100 {
+		return c.Status(400).JSON(fiber.Map{"error": "ชื่อต้องมีความยาวไม่เกิน 100 ตัวอักษร"})
+	}
+	if len(input.MostFearAnimal) > 100 {
+		return c.Status(400).JSON(fiber.Map{"error": "ชื่อสัตว์ต้องมีความยาวไม่เกิน 100 ตัวอักษร"})
+	}
 
 	const maxRetries = 5
 	for attempt := 0; attempt < maxRetries; attempt++ {

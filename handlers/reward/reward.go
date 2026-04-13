@@ -84,8 +84,13 @@ func RedeemReward(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "ตัดเหรียญไม่สำเร็จ"})
 	}
 
-	// ตัดสต็อก Reward ด้วย atomic expression
-	if err := tx.Model(&rwd).Update("stock", gorm.Expr("stock - ?", 1)).Error; err != nil {
+	// ตัดสต็อก Reward ด้วย atomic expression + WHERE guard
+	stockResult := tx.Model(&rwd).Where("stock > 0").Update("stock", gorm.Expr("stock - ?", 1))
+	if stockResult.RowsAffected == 0 {
+		tx.Rollback()
+		return c.Status(400).JSON(fiber.Map{"error": "ของรางวัลหมดแล้ว"})
+	}
+	if err := stockResult.Error; err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "ตัดสต็อกไม่สำเร็จ"})
 	}

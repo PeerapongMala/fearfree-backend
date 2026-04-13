@@ -99,6 +99,10 @@ func SubmitStageResult(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
+	if len(input.SymptomNote) > 2000 {
+		return c.Status(400).JSON(fiber.Map{"error": "บันทึกอาการต้องมีความยาวไม่เกิน 2000 ตัวอักษร"})
+	}
+
 	var patient models.Patient
 	if err := database.DB.Where("user_id = ?", userID).First(&patient).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบผู้ป่วย"})
